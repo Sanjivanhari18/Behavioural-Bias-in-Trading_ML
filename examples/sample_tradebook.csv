@@ -1,0 +1,14 @@
+date,symbol,side,quantity,price,order_type,realized_pnl
+2024-01-02,AAPL,buy,10,150.25,Market,0
+2024-01-05,AAPL,sell,10,152.50,Market,22.50
+2024-01-08,AAPL,buy,15,151.00,Market,0
+2024-01-10,AAPL,sell,15,149.75,Market,-18.75
+2024-01-12,AAPL,buy,20,148.50,Market,0
+2024-01-15,AAPL,sell,20,150.00,Market,30.00
+2024-01-18,AAPL,buy,10,151.25,Market,0
+2024-01-20,AAPL,sell,10,153.00,Market,17.50
+2024-01-22,AAPL,buy,25,152.00,Market,0
+2024-01-25,AAPL,sell,25,150.50,Market,-37.50
+2024-01-28,AAPL,buy,12,149.75,Market,0
+2024-01-30,AAPL,sell,12,151.25,Market,18.00
+
