@@ -697,8 +697,8 @@ class BehavioralVisualizer:
             specs=[[{"type": "bar"}, {"type": "bar"}],
                    [{"type": "bar"}, {"type": "indicator"}],
                    [{"type": "bar"}, {"type": "table"}]],
-            vertical_spacing=0.18,  # Increased spacing to prevent text overlap
-            row_heights=[0.32, 0.35, 0.33],  # Adjusted row heights for better spacing
+            vertical_spacing=0.25,  # Increased spacing to prevent text overlap
+            row_heights=[0.35, 0.35, 0.30],  # Adjusted row heights - more space for row 1
             horizontal_spacing=0.15
         )
         
@@ -816,8 +816,8 @@ class BehavioralVisualizer:
         fig.add_trace(go.Indicator(
             mode="gauge+number+delta",
             value=signal_score,
-            domain={'x': [0, 1], 'y': [0, 1]},
-            title={'text': "Signal Following<br>Score (%)"},
+            domain={'x': [0.1, 0.9], 'y': [0.15, 0.85]},  # Reduced domain to add padding and prevent overlap
+            title={'text': "Signal Following<br>Score (%)", 'font': {'size': 14}},
             delta={'reference': 50},
             gauge={
                 'axis': {'range': [None, 100]},
@@ -890,10 +890,18 @@ class BehavioralVisualizer:
             ), row=3, col=2)
         
         fig.update_layout(
-            height=1200,  # Increased height to accommodate spacing
+            height=1300,  # Increased height to accommodate spacing
             title_text="Signal Following Scorecard - How Well Did You Follow Technical Indicators?",
             showlegend=True,
-            margin=dict(t=120, b=60, l=60, r=60)  # Add more margins to prevent overlap
+            margin=dict(t=120, b=80, l=60, r=60)  # Increased bottom margin to prevent overlap
+        )
+        
+        # Add extra bottom margin to MACD chart to prevent overlap with gauge
+        fig.update_layout(
+            xaxis2=dict(
+                automargin=True,
+                tickangle=-45
+            )
         )
         
         # Add explanation annotation for gauge calculation (positioned below gauge)
@@ -918,10 +926,15 @@ class BehavioralVisualizer:
                 row=2, col=2
             )
         
-        # Update axes
+        # Update axes with proper spacing
         fig.update_xaxes(title_text="Signal Type", row=1, col=1)
         fig.update_yaxes(title_text="Count", row=1, col=1)
-        fig.update_xaxes(title_text="Signal Type", row=1, col=2)
+        fig.update_xaxes(
+            title_text="Signal Type", 
+            row=1, col=2,
+            tickangle=-45,  # Angle labels to prevent overlap
+            automargin=True  # Automatically adjust margins
+        )
         fig.update_yaxes(title_text="Count", row=1, col=2)
         fig.update_xaxes(title_text="Trend Type", row=2, col=1)
         fig.update_yaxes(title_text="Count", row=2, col=1)
@@ -929,6 +942,118 @@ class BehavioralVisualizer:
         fig.update_yaxes(title_text="Missed Count", row=3, col=1)
         
         self.figures['signal_scorecard'] = fig
+        return fig
+    
+    def create_stability_scorecard(self, stability_results: Dict) -> go.Figure:
+        """
+        Create a visualization for the Behavioral Stability / Consistency Score.
+        
+        This score measures how consistent a trader's behavior is over time.
+        It does NOT measure skill or profitability - only consistency.
+        
+        Args:
+            stability_results: Dictionary from BehavioralStabilityAnalyzer.calculate_stability_score()
+            
+        Returns:
+            Plotly figure with stability score visualization
+        """
+        from plotly.subplots import make_subplots
+        
+        if stability_results.get('stability_score') is None:
+            # Create empty figure with message
+            fig = go.Figure()
+            fig.add_annotation(
+                text="Insufficient data to calculate behavioral stability score.",
+                xref="paper", yref="paper",
+                x=0.5, y=0.5, showarrow=False,
+                font=dict(size=14)
+            )
+            fig.update_layout(title="Behavioral Stability Score - Data Not Available", height=400)
+            self.figures['stability_scorecard'] = fig
+            return fig
+        
+        score = stability_results['stability_score']
+        components = stability_results.get('components', {})
+        
+        # Create subplots: gauge at top, component breakdown below
+        fig = make_subplots(
+            rows=2, cols=1,
+            subplot_titles=('Behavioral Stability Score', 'Component Breakdown'),
+            vertical_spacing=0.25,
+            row_heights=[0.5, 0.5],
+            specs=[[{"type": "indicator"}], [{"type": "bar"}]]
+        )
+        
+        # Main gauge
+        fig.add_trace(go.Indicator(
+            mode="gauge+number+delta",
+            value=score,
+            domain={'x': [0, 1], 'y': [0, 1]},
+            title={'text': "Behavioral Stability<br>Consistency Index"},
+            delta={'reference': 50},
+            gauge={
+                'axis': {'range': [None, 100]},
+                'bar': {'color': "darkgreen" if score >= 70 else "orange" if score >= 50 else "red"},
+                'steps': [
+                    {'range': [0, 30], 'color': "lightgray"},
+                    {'range': [30, 50], 'color': "gray"},
+                    {'range': [50, 70], 'color': "lightyellow"},
+                    {'range': [70, 100], 'color': "lightgreen"}
+                ],
+                'threshold': {
+                    'line': {'color': "red", 'width': 4},
+                    'thickness': 0.75,
+                    'value': 70
+                }
+            }
+        ), row=1, col=1)
+        
+        # Component breakdown bar chart
+        if components:
+            comp_names = []
+            comp_scores = []
+            for comp_name, comp_data in components.items():
+                if comp_data.get('stability_score') is not None:
+                    comp_names.append(comp_data.get('feature_name', comp_name))
+                    comp_scores.append(comp_data['stability_score'])
+            
+            if comp_names:
+                fig.add_trace(go.Bar(
+                    x=comp_names,
+                    y=comp_scores,
+                    marker_color=['green' if s >= 70 else 'orange' if s >= 50 else 'red' for s in comp_scores],
+                    text=[f"{s:.1f}" for s in comp_scores],
+                    textposition='outside',
+                    name='Component Stability'
+                ), row=2, col=1)
+        
+        # Add interpretation text
+        interpretation = stability_results.get('interpretation', '')
+        note = stability_results.get('note', '')
+        
+        fig.add_annotation(
+            text=f"<b>Interpretation:</b><br>{interpretation.split('Overall Assessment:')[1].split('Component Analysis:')[0] if 'Overall Assessment:' in interpretation else ''}<br><br><b>Note:</b> {note}",
+            xref="paper", yref="paper",
+            x=0.5, y=-0.15,
+            xanchor="center",
+            yanchor="top",
+            showarrow=False,
+            bgcolor="rgba(255, 255, 255, 0.9)",
+            bordercolor="black",
+            borderwidth=1,
+            font=dict(size=10)
+        )
+        
+        fig.update_xaxes(title_text="Behavioral Component", row=2, col=1)
+        fig.update_yaxes(title_text="Stability Score (0-100)", row=2, col=1, range=[0, 100])
+        
+        fig.update_layout(
+            height=800,
+            title_text="Behavioral Stability / Consistency Score<br><sub>This score measures consistency of behavior, not skill or profitability</sub>",
+            showlegend=False
+        )
+        
+        self.figures['stability_scorecard'] = fig
         return fig
     
     def save_all_figures(self, output_dir: str = "output/"):
@@ -963,6 +1088,7 @@ class BehavioralVisualizer:
             ('cluster_timeline', 'Cluster Distribution Timeline', 'Distribution of behavioral clusters across your trading period'),
             ('trade_journey', 'Trade Journey Timeline', 'Individual trade journeys from entry to exit with P&L'),
             ('signal_scorecard', 'Signal Following Scorecard', 'How well you followed technical indicators (RSI, MACD, EMA)'),
+            ('stability_scorecard', 'Behavioral Stability Score', 'Consistency of your trading behavior over time (does not measure skill or profitability)'),
             ('post_event', 'Post-Loss Behavior Analysis', 'Trading behavior after losses (revenge trading patterns)'),
             ('performance_matrix', 'Performance Matrix', 'Performance across different market regimes and behavioral clusters'),
             ('deviation_plots', 'Behavioral Deviation Plots', 'How your trading deviates from baseline patterns')
@@ -1008,10 +1134,10 @@ class BehavioralVisualizer:
         }
         
         body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Helvetica Neue', Arial, sans-serif;
+            background: #000000;
             color: #ffffff;
-            line-height: 1.6;
+            line-height: 1.7;
             padding: 20px;
         }
         
@@ -1022,168 +1148,175 @@ class BehavioralVisualizer:
         
         .header {
             text-align: center;
-            padding: 30px 0;
-            border-bottom: 3px solid #00d4ff;
+            padding: 40px 20px;
+            border-bottom: 2px solid #333333;
             margin-bottom: 40px;
+            background: #1a1a1a;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
         }
         
         .header h1 {
-            font-size: 2.5em;
-            color: #00d4ff;
-            text-shadow: 0 0 20px rgba(0, 212, 255, 0.5);
-            margin-bottom: 10px;
+            font-size: 2.2em;
+            color: #ffffff;
+            margin-bottom: 12px;
+            font-weight: 600;
         }
         
         .header p {
-            color: #b0b0b0;
-            font-size: 1.1em;
+            color: #e9ecef;
+            font-size: 1.05em;
         }
         
         .section {
-            background: rgba(26, 26, 46, 0.8);
-            border: 1px solid #2a2a3e;
-            border-radius: 10px;
-            padding: 25px;
+            background: #1a1a1a;
+            border: 1px solid #333333;
+            border-radius: 8px;
+            padding: 30px;
             margin-bottom: 30px;
-            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
         }
         
         .section-title {
-            font-size: 1.8em;
-            color: #00d4ff;
-            margin-bottom: 15px;
-            padding-bottom: 10px;
-            border-bottom: 2px solid #00d4ff;
+            font-size: 1.6em;
+            color: #ffffff;
+            margin-bottom: 12px;
+            padding-bottom: 12px;
+            border-bottom: 2px solid #333333;
+            font-weight: 600;
         }
         
         .section-description {
-            color: #b0b0b0;
+            color: #e9ecef;
             font-size: 0.95em;
-            margin-bottom: 20px;
-            font-style: italic;
+            margin-bottom: 24px;
+            line-height: 1.6;
         }
         
         .viz-container {
-            background: rgba(15, 15, 25, 0.6);
-            border-radius: 8px;
-            padding: 15px;
+            background: #0a0a0a;
+            border-radius: 6px;
+            padding: 20px;
             margin-bottom: 20px;
-            border: 1px solid #3a3a4e;
+            border: 1px solid #333333;
         }
         
         .viz-container iframe {
             width: 100%;
             height: 700px;
             border: none;
-            border-radius: 5px;
+            border-radius: 4px;
             background: #ffffff;
         }
         
         .text-content {
-            background: rgba(15, 15, 25, 0.6);
-            border-radius: 8px;
-            padding: 25px;
+            background: #0a0a0a;
+            border-radius: 6px;
+            padding: 24px;
             margin: 20px 0;
-            border: 1px solid #3a3a4e;
+            border: 1px solid #333333;
             white-space: pre-wrap;
-            font-family: 'Courier New', monospace;
-            font-size: 0.95em;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', monospace;
+            font-size: 0.9em;
             line-height: 1.8;
-            color: #e0e0e0;
+            color: #ffffff;
             max-height: 600px;
             overflow-y: auto;
         }
         
         .text-content::-webkit-scrollbar {
-            width: 10px;
+            width: 8px;
         }
         
         .text-content::-webkit-scrollbar-track {
-            background: rgba(26, 26, 46, 0.5);
-            border-radius: 5px;
+            background: #1a1a1a;
+            border-radius: 4px;
         }
         
         .text-content::-webkit-scrollbar-thumb {
-            background: #00d4ff;
-            border-radius: 5px;
+            background: #6c757d;
+            border-radius: 4px;
         }
         
         .text-content::-webkit-scrollbar-thumb:hover {
-            background: #00b8e6;
+            background: #868e96;
         }
         
         .download-btn {
             display: inline-block;
-            background: linear-gradient(135deg, #00d4ff 0%, #0099cc 100%);
+            background: #6c757d;
             color: #ffffff;
-            padding: 12px 25px;
+            padding: 10px 20px;
             text-decoration: none;
             border: none;
             border-radius: 5px;
-            font-weight: bold;
+            font-weight: 500;
             margin: 10px 10px 10px 0;
-            transition: all 0.3s ease;
-            box-shadow: 0 2px 10px rgba(0, 212, 255, 0.3);
+            transition: background-color 0.2s ease;
             cursor: pointer;
-            font-size: 1em;
+            font-size: 0.95em;
             font-family: inherit;
         }
         
         .download-btn:hover {
-            background: linear-gradient(135deg, #00b8e6 0%, #0077aa 100%);
-            transform: translateY(-2px);
-            box-shadow: 0 4px 15px rgba(0, 212, 255, 0.5);
+            background: #868e96;
         }
         
         .download-btn:active {
-            transform: translateY(0);
+            background: #5a6268;
         }
         
         .scale-info {
-            background: rgba(0, 212, 255, 0.1);
-            border-left: 4px solid #00d4ff;
-            padding: 15px;
-            margin: 15px 0;
-            border-radius: 5px;
+            background: #0a0a0a;
+            border-left: 3px solid #6c757d;
+            padding: 14px 16px;
+            margin: 16px 0;
+            border-radius: 4px;
             font-size: 0.9em;
+            color: #e9ecef;
         }
         
         .scale-info strong {
-            color: #00d4ff;
+            color: #ffffff;
         }
         
         .nav-menu {
             position: fixed;
             top: 20px;
             right: 20px;
-            background: rgba(26, 26, 46, 0.95);
-            border: 1px solid #00d4ff;
-            border-radius: 8px;
-            padding: 15px;
+            background: #1a1a1a;
+            border: 1px solid #333333;
+            border-radius: 6px;
+            padding: 16px;
             z-index: 1000;
-            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.5);
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
         }
         
         .nav-menu h3 {
-            color: #00d4ff;
-            font-size: 1em;
+            color: #ffffff;
+            font-size: 0.95em;
             margin-bottom: 10px;
+            font-weight: 600;
         }
         
         .nav-menu a {
             display: block;
-            color: #ffffff;
+            color: #e9ecef;
             text-decoration: none;
-            padding: 5px 0;
+            padding: 6px 0;
             font-size: 0.9em;
-            transition: color 0.3s;
+            transition: color 0.2s;
         }
         
         .nav-menu a:hover {
-            color: #00d4ff;
+            color: #ffffff;
         }
         
         @media (max-width: 768px) {
+            body {
+                padding: 12px;
+            }
+            
             .nav-menu {
                 position: relative;
                 top: 0;
@@ -1191,8 +1324,16 @@ class BehavioralVisualizer:
                 margin-bottom: 20px;
             }
             
+            .header {
+                padding: 30px 15px;
+            }
+            
             .header h1 {
-                font-size: 1.8em;
+                font-size: 1.6em;
+            }
+            
+            .section {
+                padding: 20px;
             }
             
             .viz-container iframe {
@@ -1214,7 +1355,7 @@ class BehavioralVisualizer:
 </head>
 <body>
     <div class="nav-menu">
-        <h3>Quick Navigation</h3>
+        <h3>Navigation</h3>
         <a href="#visualizations">Visualizations</a>
         <a href="#xai-explanation">XAI Summary</a>
         <a href="#behavioral-report">Full Report</a>
@@ -1222,13 +1363,13 @@ class BehavioralVisualizer:
     
     <div class="container">
         <div class="header">
-            <h1>📊 Behavioral Trading Analysis Dashboard</h1>
+            <h1>Behavioral Trading Analysis Dashboard</h1>
             <p>Comprehensive analysis of your trading behavior, patterns, and performance</p>
         </div>
         
         <div id="visualizations">
             <div class="section">
-                <h2 class="section-title">📈 Interactive Visualizations</h2>
+                <h2 class="section-title">Interactive Visualizations</h2>
                 <p class="section-description">Explore your trading patterns through interactive charts. Hover over data points for detailed information.</p>
 """)
         
@@ -1241,8 +1382,7 @@ class BehavioralVisualizer:
                     <h3 class="section-title">{viz_title}</h3>
                     <p class="section-description">{viz_desc}</p>
                     <div class="scale-info">
-                        <strong>Scale Information:</strong> This visualization uses interactive Plotly charts. 
-                        Zoom in/out using the toolbar, hover for details, and use the legend to toggle series.
+                        <strong>Note:</strong> Interactive charts - zoom, hover for details, toggle series via legend.
                     </div>
                     <div class="viz-container">
                         <iframe src="{viz_name}.html" title="{viz_title}"></iframe>
@@ -1255,9 +1395,9 @@ class BehavioralVisualizer:
         
         <div id="xai-explanation">
             <div class="section">
-                <h2 class="section-title">🤖 Explainable AI (XAI) Summary</h2>
+                <h2 class="section-title">Explainable AI Summary</h2>
                 <p class="section-description">AI-generated explanation of your trading behavior using rule-based Natural Language Generation and feature contribution ranking.</p>
-                <button onclick="downloadFile('xai_explanation.txt')" class="download-btn">📥 Download XAI Explanation</button>
+                <button onclick="downloadFile('xai_explanation.txt')" class="download-btn">Download XAI Explanation</button>
                 <div class="text-content">""")
         
         # Add XAI content (escape HTML)
@@ -1271,9 +1411,9 @@ class BehavioralVisualizer:
         
         <div id="behavioral-report">
             <div class="section">
-                <h2 class="section-title">📋 Detailed Behavioral Report</h2>
+                <h2 class="section-title">Detailed Behavioral Report</h2>
                 <p class="section-description">Comprehensive analysis including statistics, baselines, clusters, change points, and anomalies.</p>
-                <button onclick="downloadFile('behavioral_report.txt')" class="download-btn">📥 Download Full Report</button>
+                <button onclick="downloadFile('behavioral_report.txt')" class="download-btn">Download Full Report</button>
                 <div class="text-content">""")
         
         # Add report content (escape HTML)
@@ -1285,8 +1425,8 @@ class BehavioralVisualizer:
             </div>
         </div>
         
-        <div class="section" style="text-align: center; padding: 30px;">
-            <p style="color: #b0b0b0; font-size: 0.9em;">
+        <div class="section" style="text-align: center; padding: 30px; background: #0a0a0a;">
+            <p style="color: #e9ecef; font-size: 0.9em;">
                 Generated by Behavioral Trading Analysis System<br>
                 Using Explainable AI (XAI) and Advanced Pattern Recognition
             </p>

@@ -137,8 +137,19 @@ class BehavioralExplainer:
         
         return explanation
     
-    def explain_change_point(self, change_point_idx: int, segments: List[Dict]) -> str:
-        """Explain a detected change point."""
+    def explain_change_point(self, change_point_idx: int, segments: List[Dict], 
+                            features: Optional[pd.DataFrame] = None) -> str:
+        """
+        Explain a detected change point with "What changed?" summary.
+        
+        Args:
+            change_point_idx: Index of the change point
+            segments: List of segment dictionaries
+            features: Optional DataFrame with features for detailed analysis
+            
+        Returns:
+            Explanation string with top 3 features that changed most
+        """
         # Find segment containing this change point
         for i, segment in enumerate(segments):
             if segment['end_idx'] == change_point_idx:
@@ -147,21 +158,124 @@ class BehavioralExplainer:
                 
                 if prev_segment and next_segment:
                     explanation = f"Behavioral Change Point Detected:\n"
-                    explanation += f"  • Date: {segment['start_date']}\n"
+                    explanation += f"  • Date: {segment.get('start_date', 'N/A')}\n"
                     explanation += f"  • Previous period avg trades/day: {prev_segment['avg_trades_per_day']:.2f}\n"
                     explanation += f"  • New period avg trades/day: {next_segment['avg_trades_per_day']:.2f}\n"
                     explanation += f"  • Previous period avg P&L: ${prev_segment['avg_pnl']:.2f}\n"
                     explanation += f"  • New period avg P&L: ${next_segment['avg_pnl']:.2f}\n"
                     
+                    # "What changed?" Summary - Top 3 features that shifted most
+                    if features is not None:
+                        what_changed = self._analyze_change_point_features(
+                            features, prev_segment, next_segment
+                        )
+                        if what_changed:
+                            explanation += "\n" + "=" * 60 + "\n"
+                            explanation += "WHAT CHANGED? - Top 3 Feature Shifts:\n"
+                            explanation += "=" * 60 + "\n"
+                            for idx, change_info in enumerate(what_changed[:3], 1):
+                                explanation += f"\n{idx}. {change_info['feature_name']}:\n"
+                                explanation += f"   Before: {change_info['before_value']:.2f}\n"
+                                explanation += f"   After:  {change_info['after_value']:.2f}\n"
+                                explanation += f"   Change: {change_info['change_description']}\n"
+                    
                     # Interpretation
                     if abs(next_segment['avg_trades_per_day'] - prev_segment['avg_trades_per_day']) > 1:
-                        explanation += "\nInterpretation: Significant change in trading frequency detected."
+                        explanation += "\n\nInterpretation: Significant change in trading frequency detected."
                     if abs(next_segment['avg_pnl'] - prev_segment['avg_pnl']) > 100:
                         explanation += "\nInterpretation: Significant change in performance detected."
                     
                     return explanation
         
         return f"Change point at index {change_point_idx}: No detailed analysis available."
+    
+    def _analyze_change_point_features(self, features: pd.DataFrame,
+                                       prev_segment: Dict,
+                                       next_segment: Dict) -> List[Dict]:
+        """
+        Analyze which features changed most between segments.
+        
+        Args:
+            features: DataFrame with all features
+            prev_segment: Previous segment dictionary
+            next_segment: Next segment dictionary
+            
+        Returns:
+            List of change information dictionaries, sorted by magnitude of change
+        """
+        if 'start_idx' not in prev_segment or 'end_idx' not in prev_segment:
+            return []
+        if 'start_idx' not in next_segment or 'end_idx' not in next_segment:
+            return []
+        
+        prev_start = prev_segment['start_idx']
+        prev_end = prev_segment['end_idx']
+        next_start = next_segment['start_idx']
+        next_end = next_segment['end_idx']
+        
+        # Get data for each segment
+        prev_data = features.iloc[prev_start:prev_end]
+        next_data = features.iloc[next_start:next_end]
+        
+        if len(prev_data) == 0 or len(next_data) == 0:
+            return []
+        
+        # Key behavioral features to analyze
+        key_features = [
+            ('trades_per_day', 'Trade Frequency'),
+            ('position_size_normalized_by_volatility', 'Position Size (Volatility-Adjusted)'),
+            ('holding_duration_days', 'Holding Duration'),
+            ('entry_price_distance_from_ema20', 'Entry Price Distance from EMA20'),
+            ('time_gap_hours_since_last_trade', 'Time Gap Between Trades'),
+            ('trades_after_loss', 'Trades After Loss'),
+            ('position_size_dollar_value', 'Position Size (Dollar Value)')
+        ]
+        
+        changes = []
+        
+        for feature_col, feature_name in key_features:
+            if feature_col not in features.columns:
+                continue
+            
+            # Calculate means for each segment
+            prev_mean = prev_data[feature_col].replace([np.inf, -np.inf], np.nan).mean()
+            next_mean = next_data[feature_col].replace([np.inf, -np.inf], np.nan).mean()
+            
+            if pd.isna(prev_mean) or pd.isna(next_mean):
+                continue
+            
+            # Calculate change
+            if abs(prev_mean) > 1e-6:
+                pct_change = ((next_mean - prev_mean) / abs(prev_mean)) * 100
+                abs_change = next_mean - prev_mean
+            else:
+                # Handle case where prev_mean is near zero
+                pct_change = 100 if abs(next_mean) > 1e-6 else 0
+                abs_change = next_mean - prev_mean
+            
+            # Only include significant changes (>10% or meaningful absolute change)
+            if abs(pct_change) > 10 or abs(abs_change) > 0.1:
+                # Create human-readable change description
+                if pct_change > 0:
+                    change_desc = f"Increased by {abs(pct_change):.1f}% ({abs_change:+.2f})"
+                else:
+                    change_desc = f"Decreased by {abs(pct_change):.1f}% ({abs_change:+.2f})"
+                
+                changes.append({
+                    'feature_name': feature_name,
+                    'feature_col': feature_col,
+                    'before_value': prev_mean,
+                    'after_value': next_mean,
+                    'change_pct': pct_change,
+                    'change_abs': abs_change,
+                    'change_description': change_desc,
+                    'change_magnitude': abs(pct_change)  # For sorting
+                })
+        
+        # Sort by magnitude of change (descending)
+        changes.sort(key=lambda x: x['change_magnitude'], reverse=True)
+        
+        return changes
     
     def generate_feature_attribution(self, trade_idx: int, features: pd.DataFrame, 
                                     cluster_centers: np.ndarray, cluster_id: int) -> str:
@@ -282,7 +396,8 @@ class BehavioralExplainer:
             report.append("-" * 80)
             for cp_idx in pattern_results['change_points']['indices']:
                 report.append(self.explain_change_point(cp_idx, 
-                                                       pattern_results['change_points']['segments']))
+                                                       pattern_results['change_points']['segments'],
+                                                       features))
                 report.append("")
         
         # Anomalies
@@ -293,12 +408,29 @@ class BehavioralExplainer:
             report.append("These trades deviate significantly from baseline behavior patterns.")
             report.append("")
         
+        # Behavioral Biases (NEW)
+        report.append("BEHAVIORAL BIAS MAPPING")
+        report.append("-" * 80)
+        bias_mappings = self.map_behavioral_biases(features, pattern_results, baselines)
+        if bias_mappings['total_biases_detected'] > 0:
+            for bias_info in bias_mappings['biases']:
+                report.append(f"\n{bias_info['bias']}:")
+                report.append(f"  Pattern: {bias_info['pattern']}")
+                report.append(f"  Probability: {bias_info['probability']*100:.0f}% ({bias_info['strength']} signal)")
+                report.append(f"  Explanation: {bias_info['explanation']}")
+                report.append("")
+        else:
+            report.append("No significant behavioral biases detected in the analyzed patterns.")
+            report.append("")
+        report.append(f"Note: {bias_mappings['note']}")
+        report.append("")
+        
         report.append("=" * 80)
         
         return "\n".join(report)
     
     def generate_xai_summary(self, features: pd.DataFrame, baselines: Dict, 
-                            pattern_results: Dict) -> str:
+                            pattern_results: Dict, stability_results: Optional[Dict] = None) -> str:
         """
         Generate an explainable AI summary paragraph (~100 words) using rule-based NLG.
         
@@ -417,7 +549,25 @@ class BehavioralExplainer:
                     f"({overbought_sells + oversold_buys}/{overbought + oversold} signals acted upon)."
                 )
         
-        # 5. Change Points and Anomalies
+        # 5. Behavioral Stability Score (NEW)
+        if stability_results and stability_results.get('stability_score') is not None:
+            stability_score = stability_results['stability_score']
+            if stability_score >= 70:
+                stability_desc = "highly consistent"
+            elif stability_score >= 50:
+                stability_desc = "moderately consistent"
+            elif stability_score >= 30:
+                stability_desc = "somewhat variable"
+            else:
+                stability_desc = "highly variable"
+            
+            summary_parts.append(
+                f"Behavioral stability score: {stability_score:.0f}/100 ({stability_desc}), "
+                f"indicating {stability_desc.replace('highly ', '').replace('moderately ', '').replace('somewhat ', '')} "
+                f"trading patterns over time."
+            )
+        
+        # 6. Change Points and Anomalies
         if 'change_points' in pattern_results and pattern_results['change_points']['indices']:
             num_change_points = len(pattern_results['change_points']['indices'])
             summary_parts.append(
@@ -499,4 +649,228 @@ class BehavioralExplainer:
             full_summary = " ".join(final_words[:105])
         
         return full_summary
+    
+    def map_behavioral_biases(self, features: pd.DataFrame, 
+                             pattern_results: Dict,
+                             baselines: Optional[Dict] = None) -> Dict:
+        """
+        Explicit Bias Mapping Layer - maps detected patterns to behavioral biases.
+        
+        This is a rule-based, probabilistic mapping system that identifies potential
+        behavioral biases without making definitive diagnoses. Uses probabilistic language
+        and explains patterns in human terms.
+        
+        Mapped Biases:
+        - Revenge Trading: Increased trade frequency after loss
+        - Overconfidence: Larger position sizes during high volatility
+        - FOMO (Fear of Missing Out): Buying far above EMA repeatedly
+        - Loss Aversion: Holding losers longer than winners
+        
+        Args:
+            features: DataFrame with trade features
+            pattern_results: Pattern discovery results
+            baselines: Optional baseline statistics
+            
+        Returns:
+            Dictionary with bias mappings and probabilities
+        """
+        bias_mappings = []
+        
+        # 1. Revenge Trading Detection
+        revenge_trading = self._detect_revenge_trading(features, baselines)
+        if revenge_trading['detected']:
+            bias_mappings.append(revenge_trading)
+        
+        # 2. Overconfidence Detection
+        overconfidence = self._detect_overconfidence(features, baselines)
+        if overconfidence['detected']:
+            bias_mappings.append(overconfidence)
+        
+        # 3. FOMO Detection
+        fomo = self._detect_fomo(features, baselines)
+        if fomo['detected']:
+            bias_mappings.append(fomo)
+        
+        # 4. Loss Aversion Detection
+        loss_aversion = self._detect_loss_aversion(features, baselines)
+        if loss_aversion['detected']:
+            bias_mappings.append(loss_aversion)
+        
+        return {
+            'biases': bias_mappings,
+            'total_biases_detected': len(bias_mappings),
+            'note': "These are probabilistic mappings based on patterns. They are not diagnoses."
+        }
+    
+    def _detect_revenge_trading(self, features: pd.DataFrame, 
+                                baselines: Optional[Dict]) -> Dict:
+        """
+        Detect revenge trading: Increased trade frequency after loss.
+        
+        Pattern: Increased trade frequency after a loss (within 48 hours)
+        """
+        if 'trades_after_loss' not in features.columns or 'is_loss' not in features.columns:
+            return {'detected': False, 'bias': 'Revenge Trading'}
+        
+        # Count trades after losses
+        loss_trades = features[features['is_loss'] == 1]
+        if len(loss_trades) == 0:
+            return {'detected': False, 'bias': 'Revenge Trading'}
+        
+        # Calculate average trades after loss
+        avg_trades_after_loss = features['trades_after_loss'].mean()
+        
+        # Compare to baseline trade frequency
+        baseline_freq = features['trades_per_day'].mean() if 'trades_per_day' in features.columns else 1.0
+        
+        # Threshold: if trades after loss > 1.5x baseline, likely revenge trading
+        threshold = baseline_freq * 1.5
+        
+        if avg_trades_after_loss > threshold:
+            # Calculate probability/strength
+            ratio = avg_trades_after_loss / (baseline_freq + 1e-6)
+            probability = min(0.95, 0.5 + (ratio - 1.5) * 0.15)  # Scale to 0.5-0.95
+            
+            return {
+                'detected': True,
+                'bias': 'Revenge Trading',
+                'pattern': f"Increased trade frequency after loss (avg {avg_trades_after_loss:.1f} trades vs baseline {baseline_freq:.1f})",
+                'probability': probability,
+                'strength': 'strong' if probability > 0.75 else 'moderate' if probability > 0.6 else 'weak',
+                'explanation': f"There is a {probability*100:.0f}% probability that you may be engaging in revenge trading. "
+                              f"After losses, your trade frequency increases by {ratio:.1f}x, suggesting emotional reactions "
+                              f"to losses rather than systematic decision-making."
+            }
+        
+        return {'detected': False, 'bias': 'Revenge Trading'}
+    
+    def _detect_overconfidence(self, features: pd.DataFrame, 
+                              baselines: Optional[Dict]) -> Dict:
+        """
+        Detect overconfidence: Larger position sizes during high volatility.
+        
+        Pattern: Position sizes are larger during high volatility periods
+        """
+        if 'position_size_normalized_by_volatility' not in features.columns:
+            return {'detected': False, 'bias': 'Overconfidence'}
+        
+        if 'volatility_rolling_std' not in features.columns:
+            return {'detected': False, 'bias': 'Overconfidence'}
+        
+        # Split into high and low volatility periods
+        vol_median = features['volatility_rolling_std'].median()
+        high_vol_mask = features['volatility_rolling_std'] > vol_median
+        low_vol_mask = features['volatility_rolling_std'] <= vol_median
+        
+        if high_vol_mask.sum() == 0 or low_vol_mask.sum() == 0:
+            return {'detected': False, 'bias': 'Overconfidence'}
+        
+        # Compare position sizes
+        high_vol_sizes = features.loc[high_vol_mask, 'position_size_normalized_by_volatility']
+        low_vol_sizes = features.loc[low_vol_mask, 'position_size_normalized_by_volatility']
+        
+        avg_high_vol_size = high_vol_sizes.mean()
+        avg_low_vol_size = low_vol_sizes.mean()
+        
+        # Threshold: if high vol size > 1.2x low vol size, likely overconfidence
+        if avg_high_vol_size > avg_low_vol_size * 1.2:
+            ratio = avg_high_vol_size / (avg_low_vol_size + 1e-6)
+            probability = min(0.95, 0.5 + (ratio - 1.2) * 0.2)  # Scale to 0.5-0.95
+            
+            return {
+                'detected': True,
+                'bias': 'Overconfidence',
+                'pattern': f"Larger position sizes during high volatility ({avg_high_vol_size:.2f} vs {avg_low_vol_size:.2f} in low vol)",
+                'probability': probability,
+                'strength': 'strong' if probability > 0.75 else 'moderate' if probability > 0.6 else 'weak',
+                'explanation': f"There is a {probability*100:.0f}% probability that overconfidence may be influencing your trading. "
+                              f"During high volatility periods, your position sizes are {ratio:.1f}x larger, suggesting "
+                              f"you may be overestimating your ability to handle market uncertainty."
+            }
+        
+        return {'detected': False, 'bias': 'Overconfidence'}
+    
+    def _detect_fomo(self, features: pd.DataFrame, 
+                    baselines: Optional[Dict]) -> Dict:
+        """
+        Detect FOMO (Fear of Missing Out): Buying far above EMA repeatedly.
+        
+        Pattern: Repeatedly buying at prices significantly above EMA (chasing trends)
+        """
+        if 'entry_price_distance_from_ema20' not in features.columns:
+            return {'detected': False, 'bias': 'FOMO'}
+        
+        if 'side' not in features.columns:
+            return {'detected': False, 'bias': 'FOMO'}
+        
+        # Focus on buy trades
+        buy_trades = features[features['side'] == 'buy']
+        if len(buy_trades) == 0:
+            return {'detected': False, 'bias': 'FOMO'}
+        
+        # Count trades where entry is significantly above EMA (e.g., > 2%)
+        fomo_threshold = 0.02  # 2% above EMA
+        fomo_trades = buy_trades[buy_trades['entry_price_distance_from_ema20'] > fomo_threshold]
+        
+        fomo_ratio = len(fomo_trades) / len(buy_trades)
+        
+        # Threshold: if > 30% of buys are far above EMA, likely FOMO
+        if fomo_ratio > 0.3:
+            avg_distance = fomo_trades['entry_price_distance_from_ema20'].mean()
+            probability = min(0.95, 0.5 + (fomo_ratio - 0.3) * 1.5)  # Scale to 0.5-0.95
+            
+            return {
+                'detected': True,
+                'bias': 'FOMO (Fear of Missing Out)',
+                'pattern': f"Buying far above EMA repeatedly ({len(fomo_trades)}/{len(buy_trades)} buys, avg {avg_distance*100:.1f}% above EMA)",
+                'probability': probability,
+                'strength': 'strong' if probability > 0.75 else 'moderate' if probability > 0.6 else 'weak',
+                'explanation': f"There is a {probability*100:.0f}% probability that FOMO may be influencing your trading. "
+                              f"{fomo_ratio*100:.0f}% of your buy trades occur when prices are significantly above the EMA, "
+                              f"suggesting you may be chasing trends rather than waiting for better entry points."
+            }
+        
+        return {'detected': False, 'bias': 'FOMO'}
+    
+    def _detect_loss_aversion(self, features: pd.DataFrame, 
+                             baselines: Optional[Dict]) -> Dict:
+        """
+        Detect loss aversion: Holding losers longer than winners.
+        
+        Pattern: Average holding duration for losing trades > winning trades
+        """
+        if 'holding_duration_days' not in features.columns:
+            return {'detected': False, 'bias': 'Loss Aversion'}
+        
+        if 'realized_pnl' not in features.columns:
+            return {'detected': False, 'bias': 'Loss Aversion'}
+        
+        # Split into winners and losers
+        winners = features[features['realized_pnl'] > 0]
+        losers = features[features['realized_pnl'] < 0]
+        
+        if len(winners) == 0 or len(losers) == 0:
+            return {'detected': False, 'bias': 'Loss Aversion'}
+        
+        # Compare holding durations
+        avg_winner_duration = winners['holding_duration_days'].mean()
+        avg_loser_duration = losers['holding_duration_days'].mean()
+        
+        # Threshold: if losers held > 1.3x longer than winners, likely loss aversion
+        if avg_loser_duration > avg_winner_duration * 1.3:
+            ratio = avg_loser_duration / (avg_winner_duration + 1e-6)
+            probability = min(0.95, 0.5 + (ratio - 1.3) * 0.3)  # Scale to 0.5-0.95
+            
+            return {
+                'detected': True,
+                'bias': 'Loss Aversion',
+                'pattern': f"Holding losers longer than winners (losers: {avg_loser_duration:.1f} days vs winners: {avg_winner_duration:.1f} days)",
+                'probability': probability,
+                'strength': 'strong' if probability > 0.75 else 'moderate' if probability > 0.6 else 'weak',
+                'explanation': f"There is a {probability*100:.0f}% probability that loss aversion may be influencing your trading. "
+                              f"You hold losing positions {ratio:.1f}x longer than winning positions, suggesting "
+                              f"you may be reluctant to realize losses and hoping positions will recover."
+            }
+        
+        return {'detected': False, 'bias': 'Loss Aversion'}
 

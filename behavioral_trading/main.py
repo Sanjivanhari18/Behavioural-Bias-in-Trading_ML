@@ -15,7 +15,8 @@ from .utils.market_data import MarketDataFetcher
 from .stage2_analysis import (
     BehavioralFeatureEngineer,
     BaselineConstructor,
-    PatternDiscoverer
+    PatternDiscoverer,
+    BehavioralStabilityAnalyzer
 )
 from .stage3_viz import (
     BehavioralVisualizer,
@@ -51,6 +52,7 @@ class BehavioralAnalyzer:
         self.feature_engineer = BehavioralFeatureEngineer()
         self.baseline_constructor = BaselineConstructor(window_size=baseline_window)
         self.pattern_discoverer = PatternDiscoverer(n_clusters=n_clusters)
+        self.stability_analyzer = BehavioralStabilityAnalyzer(window_size=baseline_window)
         
         # Stage 3 components
         self.visualizer = BehavioralVisualizer()
@@ -62,6 +64,7 @@ class BehavioralAnalyzer:
         self.features: Optional[pd.DataFrame] = None
         self.baselines: Optional[Dict] = None
         self.pattern_results: Optional[Dict] = None
+        self.stability_results: Optional[Dict] = None
     
     def load_tradebook(self, filepath: str, file_type: Optional[str] = None) -> pd.DataFrame:
         """
@@ -161,12 +164,17 @@ class BehavioralAnalyzer:
         if 'clusters' in self.pattern_results:
             self.features['behavioral_cluster'] = self.pattern_results['clusters']['labels']
         
+        # Stage 2.4: Behavioral Stability Analysis (NEW)
+        logger.info("Calculating behavioral stability score...")
+        self.stability_results = self.stability_analyzer.calculate_stability_score(self.features)
+        
         logger.info("Behavioral analysis complete")
         
         return {
             'features': self.features,
             'baselines': self.baselines,
-            'patterns': self.pattern_results
+            'patterns': self.pattern_results,
+            'stability': self.stability_results
         }
     
     def visualize(self, results: Optional[Dict] = None, output_dir: str = "output/") -> Dict[str, str]:
@@ -185,7 +193,8 @@ class BehavioralAnalyzer:
                 raise ValueError("No analysis results available. Call analyze() first.")
             results = {
                 'features': self.features,
-                'patterns': self.pattern_results
+                'patterns': self.pattern_results,
+                'stability': self.stability_results
             }
         
         features = results['features']
@@ -242,6 +251,13 @@ class BehavioralAnalyzer:
         except Exception as e:
             logger.warning(f"Could not create signal scorecard: {e}")
         
+        # Behavioral Stability Scorecard (NEW)
+        if 'stability' in results and results['stability']:
+            try:
+                self.visualizer.create_stability_scorecard(results['stability'])
+            except Exception as e:
+                logger.warning(f"Could not create stability scorecard: {e}")
+        
         # Save all figures
         os.makedirs(output_dir, exist_ok=True)
         self.visualizer.save_all_figures(output_dir)
@@ -280,7 +296,8 @@ class BehavioralAnalyzer:
             results = {
                 'features': self.features,
                 'baselines': self.baselines,
-                'patterns': self.pattern_results
+                'patterns': self.pattern_results,
+                'stability': self.stability_results
             }
         
         logger.info("Generating behavioral report...")
@@ -291,11 +308,21 @@ class BehavioralAnalyzer:
             results['patterns']
         )
         
+        # Add stability score to report if available
+        if results.get('stability') and results['stability'].get('stability_score') is not None:
+            stability_section = "\n\n" + "=" * 80 + "\n"
+            stability_section += "BEHAVIORAL STABILITY / CONSISTENCY SCORE\n"
+            stability_section += "=" * 80 + "\n\n"
+            stability_section += results['stability']['interpretation'] + "\n\n"
+            stability_section += results['stability']['note'] + "\n"
+            report += stability_section
+        
         # Generate XAI summary paragraph
         xai_summary = self.explainer.generate_xai_summary(
             results['features'],
             results['baselines'],
-            results['patterns']
+            results['patterns'],
+            results.get('stability')
         )
         
         # Save main report
