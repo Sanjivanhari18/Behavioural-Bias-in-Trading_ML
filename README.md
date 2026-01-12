@@ -81,7 +81,7 @@ analyzer.generate_report(results, output_file="behavioral_report.html")
 - **Regime-Aware**: Behavior analysis conditioned on market regimes
 - **Production-Ready**: Handles real-world PDF tradebooks from brokers
 
-## Model Choices Justification
+## Model Choices 
 
 | Model | Why Used | Where |
 |-------|----------|-------|
