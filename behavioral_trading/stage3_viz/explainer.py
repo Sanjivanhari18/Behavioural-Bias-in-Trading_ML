@@ -873,4 +873,407 @@ class BehavioralExplainer:
             }
         
         return {'detected': False, 'bias': 'Loss Aversion'}
+    
+    def analyze_stock_performance(self, features: pd.DataFrame, baselines: Optional[Dict] = None) -> str:
+        """
+        Analyze best and worst performing stocks with detailed explanations.
+        
+        For each stock, analyzes:
+        - Total P&L and win rate
+        - Entry/exit timing relative to volatility
+        - RSI conditions at entry/exit
+        - EMA positioning
+        - Market regime conditions
+        - Holding duration patterns
+        - Position sizing
+        
+        Args:
+            features: DataFrame with trade features
+            baselines: Optional baseline statistics
+            
+        Returns:
+            Detailed text report explaining best and worst stock performance
+        """
+        if 'symbol' not in features.columns or 'realized_pnl' not in features.columns:
+            return "Cannot analyze stock performance: Missing 'symbol' or 'realized_pnl' columns."
+        
+        report = []
+        report.append("=" * 80)
+        report.append("STOCK PERFORMANCE ANALYSIS - BEST & WORST PERFORMERS")
+        report.append("=" * 80)
+        report.append("")
+        report.append("This analysis explains why certain stocks performed well or poorly,")
+        report.append("examining timing, volatility, market indicators, and trading behavior.")
+        report.append("")
+        
+        # Group trades by symbol and calculate performance metrics
+        symbol_performance = {}
+        
+        for symbol in features['symbol'].dropna().unique():
+            symbol_trades = features[features['symbol'] == symbol].copy()
+            
+            if len(symbol_trades) == 0:
+                continue
+            
+            # Calculate performance metrics
+            total_pnl = symbol_trades['realized_pnl'].sum()
+            avg_pnl = symbol_trades['realized_pnl'].mean()
+            win_rate = (symbol_trades['realized_pnl'] > 0).mean() * 100
+            num_trades = len(symbol_trades)
+            num_wins = (symbol_trades['realized_pnl'] > 0).sum()
+            num_losses = (symbol_trades['realized_pnl'] < 0).sum()
+            
+            # Separate buy and sell trades
+            if 'side' in symbol_trades.columns:
+                side_col = symbol_trades['side'].astype(str).str.lower().str.strip()
+                buy_trades = symbol_trades[(side_col == 'buy') & (side_col != 'nan')]
+                sell_trades = symbol_trades[(side_col == 'sell') & (side_col != 'nan')]
+            else:
+                buy_trades = pd.DataFrame()
+                sell_trades = pd.DataFrame()
+            
+            # Analyze entry conditions (buy trades)
+            entry_analysis = {}
+            if len(buy_trades) > 0:
+                if 'rsi_14' in buy_trades.columns:
+                    rsi_data = buy_trades['rsi_14'].dropna()
+                    if len(rsi_data) > 0:
+                        entry_analysis['avg_rsi'] = rsi_data.mean()
+                        entry_analysis['oversold_entries'] = (rsi_data < 30).sum()
+                        entry_analysis['overbought_entries'] = (rsi_data > 70).sum()
+                
+                if 'volatility_rolling_std' in buy_trades.columns:
+                    vol_data = buy_trades['volatility_rolling_std'].dropna()
+                    if len(vol_data) > 0:
+                        entry_analysis['avg_volatility'] = vol_data.mean()
+                        vol_median = vol_data.median()
+                        entry_analysis['high_vol_entries'] = (vol_data > vol_median).sum()
+                
+                if 'entry_price_distance_from_ema20' in buy_trades.columns:
+                    ema_data = buy_trades['entry_price_distance_from_ema20'].dropna()
+                    if len(ema_data) > 0:
+                        entry_analysis['avg_ema20_distance'] = ema_data.mean()
+                        entry_analysis['above_ema_entries'] = (ema_data > 0).sum()
+                
+                if 'trend_regime' in buy_trades.columns:
+                    trend_data = buy_trades['trend_regime'].dropna()
+                    if len(trend_data) > 0:
+                        entry_analysis['trend_regimes'] = trend_data.value_counts().to_dict()
+                
+                if 'volatility_regime' in buy_trades.columns:
+                    vol_regime_data = buy_trades['volatility_regime'].dropna()
+                    if len(vol_regime_data) > 0:
+                        entry_analysis['vol_regimes'] = vol_regime_data.value_counts().to_dict()
+            
+            # Analyze exit conditions (sell trades)
+            exit_analysis = {}
+            if len(sell_trades) > 0:
+                if 'rsi_14' in sell_trades.columns:
+                    rsi_data = sell_trades['rsi_14'].dropna()
+                    if len(rsi_data) > 0:
+                        exit_analysis['avg_rsi'] = rsi_data.mean()
+                
+                if 'volatility_rolling_std' in sell_trades.columns:
+                    vol_data = sell_trades['volatility_rolling_std'].dropna()
+                    if len(vol_data) > 0:
+                        exit_analysis['avg_volatility'] = vol_data.mean()
+                
+                if 'holding_duration_days' in sell_trades.columns:
+                    duration_data = sell_trades['holding_duration_days'].dropna()
+                    if len(duration_data) > 0:
+                        exit_analysis['avg_holding_duration'] = duration_data.mean()
+                        exit_analysis['median_holding_duration'] = duration_data.median()
+            
+            # Calculate average holding duration
+            if 'holding_duration_days' in symbol_trades.columns:
+                duration_data = symbol_trades['holding_duration_days'].dropna()
+                avg_holding = duration_data.mean() if len(duration_data) > 0 else 0
+            else:
+                avg_holding = 0
+            
+            symbol_performance[symbol] = {
+                'total_pnl': total_pnl,
+                'avg_pnl': avg_pnl,
+                'win_rate': win_rate,
+                'num_trades': num_trades,
+                'num_wins': num_wins,
+                'num_losses': num_losses,
+                'avg_holding_duration': avg_holding,
+                'entry_analysis': entry_analysis,
+                'exit_analysis': exit_analysis,
+                'trades': symbol_trades
+            }
+        
+        if len(symbol_performance) == 0:
+            return "No stock performance data available for analysis."
+        
+        # Find best and worst performers
+        best_stock = max(symbol_performance.items(), key=lambda x: x[1]['total_pnl'])
+        worst_stock = min(symbol_performance.items(), key=lambda x: x[1]['total_pnl'])
+        
+        best_symbol, best_data = best_stock
+        worst_symbol, worst_data = worst_stock
+        
+        # Analyze best performing stock
+        report.append("-" * 80)
+        report.append(f"BEST PERFORMING STOCK: {best_symbol}")
+        report.append("-" * 80)
+        report.append("")
+        report.append(f"Total P&L: ${best_data['total_pnl']:,.2f}")
+        report.append(f"Average P&L per trade: ${best_data['avg_pnl']:,.2f}")
+        report.append(f"Win Rate: {best_data['win_rate']:.1f}% ({best_data['num_wins']} wins, {best_data['num_losses']} losses)")
+        report.append(f"Number of trades: {best_data['num_trades']}")
+        report.append(f"Average holding duration: {best_data['avg_holding_duration']:.1f} days")
+        report.append("")
+        report.append("WHY THIS STOCK PERFORMED WELL:")
+        report.append("")
+        
+        # Entry timing analysis
+        entry_analysis = best_data['entry_analysis']
+        if entry_analysis:
+            if 'avg_rsi' in entry_analysis:
+                rsi = entry_analysis['avg_rsi']
+                if rsi < 35:
+                    report.append(f"✓ Excellent Entry Timing: Average RSI at entry was {rsi:.1f} (oversold conditions).")
+                    report.append("  This suggests you bought when the stock was undervalued, catching good entry points.")
+                elif rsi > 65:
+                    report.append(f"⚠ Suboptimal Entry Timing: Average RSI at entry was {rsi:.1f} (overbought conditions).")
+                    report.append("  Despite this, the stock still performed well, suggesting strong momentum or good exit timing.")
+                else:
+                    report.append(f"✓ Good Entry Timing: Average RSI at entry was {rsi:.1f} (neutral conditions).")
+                    report.append("  You entered at reasonable price levels, avoiding extreme overvaluation.")
+                
+                if 'oversold_entries' in entry_analysis and entry_analysis['oversold_entries'] > 0:
+                    best_buy_trades = best_data['trades']
+                    if 'side' in best_buy_trades.columns:
+                        side_col = best_buy_trades['side'].astype(str).str.lower().str.strip()
+                        buy_count = len(best_buy_trades[(side_col == 'buy') & (side_col != 'nan')])
+                        report.append(f"  - {entry_analysis['oversold_entries']} out of {buy_count} buy trades occurred during oversold conditions (RSI < 30)")
+            
+            if 'avg_volatility' in entry_analysis:
+                if 'high_vol_entries' in entry_analysis:
+                    best_buy_trades = best_data['trades']
+                    if 'side' in best_buy_trades.columns:
+                        side_col = best_buy_trades['side'].astype(str).str.lower().str.strip()
+                        buy_count = len(best_buy_trades[(side_col == 'buy') & (side_col != 'nan')])
+                        if buy_count > 0:
+                            high_vol_pct = (entry_analysis['high_vol_entries'] / buy_count * 100)
+                            if high_vol_pct > 60:
+                                report.append(f"✓ Volatility Advantage: {high_vol_pct:.0f}% of entries occurred during high volatility periods.")
+                                report.append("  High volatility can create better entry opportunities if timed correctly.")
+                            elif high_vol_pct < 40:
+                                report.append(f"✓ Low Volatility Entries: {high_vol_pct:.0f}% of entries occurred during high volatility periods.")
+                                report.append("  You mostly entered during calmer market conditions, reducing entry risk.")
+            
+            if 'avg_ema20_distance' in entry_analysis:
+                ema_dist = entry_analysis['avg_ema20_distance']
+                # Handle both ratio (0.02 = 2%) and percentage (2.0 = 2%) formats
+                if abs(ema_dist) > 1:
+                    # Already in percentage format
+                    ema_pct = ema_dist
+                else:
+                    # Ratio format, convert to percentage
+                    ema_pct = ema_dist * 100
+                
+                if ema_pct < -2:  # More than 2% below EMA
+                    report.append(f"✓ Contrarian Entries: Average entry was {abs(ema_pct):.1f}% below EMA(20).")
+                    report.append("  You bought when prices were below the moving average, catching value opportunities.")
+                elif ema_pct > 2:  # More than 2% above EMA
+                    report.append(f"⚠ Momentum Entries: Average entry was {ema_pct:.1f}% above EMA(20).")
+                    report.append("  You bought during uptrends, which worked well for this stock.")
+                else:
+                    report.append(f"✓ Balanced Entries: Average entry was {abs(ema_pct):.1f}% from EMA(20).")
+                    report.append("  You entered at reasonable price levels relative to the trend.")
+            
+            if 'trend_regimes' in entry_analysis:
+                regimes = entry_analysis['trend_regimes']
+                total_regime_trades = sum(regimes.values())
+                if total_regime_trades > 0:
+                    if 'uptrend' in regimes:
+                        uptrend_pct = (regimes['uptrend'] / total_regime_trades * 100)
+                        if uptrend_pct > 50:
+                            report.append(f"✓ Trend Following: {uptrend_pct:.0f}% of entries occurred during uptrends.")
+                            report.append("  You successfully rode the upward momentum of this stock.")
+            
+            if 'vol_regimes' in entry_analysis:
+                vol_regimes = entry_analysis['vol_regimes']
+                total_vol_trades = sum(vol_regimes.values())
+                if total_vol_trades > 0:
+                    if 'low' in vol_regimes:
+                        low_vol_pct = (vol_regimes['low'] / total_vol_trades * 100)
+                        if low_vol_pct > 50:
+                            report.append(f"✓ Low Volatility Strategy: {low_vol_pct:.0f}% of entries occurred during low volatility periods.")
+                            report.append("  You entered when markets were calmer, reducing entry risk.")
+        
+        # Exit timing analysis
+        exit_analysis = best_data['exit_analysis']
+        if exit_analysis:
+            if 'avg_holding_duration' in exit_analysis:
+                duration = exit_analysis['avg_holding_duration']
+                if duration < 3:
+                    report.append(f"✓ Quick Profits: Average holding period was {duration:.1f} days.")
+                    report.append("  You captured profits quickly, avoiding potential reversals.")
+                elif duration > 10:
+                    report.append(f"✓ Patient Holding: Average holding period was {duration:.1f} days.")
+                    report.append("  You held positions long enough to capture significant moves.")
+                else:
+                    report.append(f"✓ Balanced Holding: Average holding period was {duration:.1f} days.")
+                    report.append("  You held positions for an appropriate duration.")
+        
+        # Position sizing (if available)
+        if 'position_size_normalized_by_volatility' in best_data['trades'].columns:
+            size_data = best_data['trades']['position_size_normalized_by_volatility'].dropna()
+            if len(size_data) > 0:
+                avg_size = size_data.mean()
+                if avg_size > 0:
+                    report.append(f"✓ Position Sizing: Average volatility-adjusted position size was {avg_size:.2f}.")
+                    report.append("  Your position sizing was appropriate for the risk level.")
+        
+        report.append("")
+        report.append("-" * 80)
+        report.append(f"WORST PERFORMING STOCK: {worst_symbol}")
+        report.append("-" * 80)
+        report.append("")
+        report.append(f"Total P&L: ${worst_data['total_pnl']:,.2f}")
+        report.append(f"Average P&L per trade: ${worst_data['avg_pnl']:,.2f}")
+        report.append(f"Win Rate: {worst_data['win_rate']:.1f}% ({worst_data['num_wins']} wins, {worst_data['num_losses']} losses)")
+        report.append(f"Number of trades: {worst_data['num_trades']}")
+        report.append(f"Average holding duration: {worst_data['avg_holding_duration']:.1f} days")
+        report.append("")
+        report.append("WHY THIS STOCK PERFORMED POORLY:")
+        report.append("")
+        
+        # Entry timing analysis for worst stock
+        entry_analysis = worst_data['entry_analysis']
+        if entry_analysis:
+            if 'avg_rsi' in entry_analysis:
+                rsi = entry_analysis['avg_rsi']
+                if rsi > 70:
+                    report.append(f"✗ Poor Entry Timing: Average RSI at entry was {rsi:.1f} (overbought conditions).")
+                    report.append("  You bought when the stock was overvalued, entering at the top of moves.")
+                elif rsi < 30:
+                    report.append(f"⚠ Oversold Entries: Average RSI at entry was {rsi:.1f} (oversold conditions).")
+                    report.append("  Despite buying at oversold levels, the stock continued to decline.")
+                    report.append("  This suggests the stock was in a strong downtrend or had fundamental issues.")
+                else:
+                    report.append(f"⚠ Neutral Entry Timing: Average RSI at entry was {rsi:.1f}.")
+                    report.append("  Entry timing was reasonable, but other factors (volatility, trend, exit timing) likely caused losses.")
+                
+                if 'overbought_entries' in entry_analysis and entry_analysis['overbought_entries'] > 0:
+                    worst_buy_trades = worst_data['trades']
+                    if 'side' in worst_buy_trades.columns:
+                        side_col = worst_buy_trades['side'].astype(str).str.lower().str.strip()
+                        buy_count = len(worst_buy_trades[(side_col == 'buy') & (side_col != 'nan')])
+                        report.append(f"  - {entry_analysis['overbought_entries']} out of {buy_count} buy trades occurred during overbought conditions (RSI > 70)")
+            
+            if 'avg_volatility' in entry_analysis:
+                if 'high_vol_entries' in entry_analysis:
+                    worst_buy_trades = worst_data['trades']
+                    if 'side' in worst_buy_trades.columns:
+                        side_col = worst_buy_trades['side'].astype(str).str.lower().str.strip()
+                        buy_count = len(worst_buy_trades[(side_col == 'buy') & (side_col != 'nan')])
+                        if buy_count > 0:
+                            high_vol_pct = (entry_analysis['high_vol_entries'] / buy_count * 100)
+                            if high_vol_pct > 60:
+                                report.append(f"✗ High Volatility Risk: {high_vol_pct:.0f}% of entries occurred during high volatility periods.")
+                                report.append("  Entering during high volatility increased risk, and the stock moved against you.")
+            
+            if 'avg_ema20_distance' in entry_analysis:
+                ema_dist = entry_analysis['avg_ema20_distance']
+                # Handle both ratio (0.02 = 2%) and percentage (2.0 = 2%) formats
+                if abs(ema_dist) > 1:
+                    # Already in percentage format
+                    ema_pct = ema_dist
+                else:
+                    # Ratio format, convert to percentage
+                    ema_pct = ema_dist * 100
+                
+                if ema_pct > 5:  # More than 5% above EMA
+                    report.append(f"✗ Chasing Trends: Average entry was {ema_pct:.1f}% above EMA(20).")
+                    report.append("  You bought too high during uptrends, entering after significant moves had already occurred.")
+                elif ema_pct < -5:  # More than 5% below EMA
+                    report.append(f"⚠ Value Trap: Average entry was {abs(ema_pct):.1f}% below EMA(20).")
+                    report.append("  Despite buying below the moving average, the stock continued to decline.")
+                    report.append("  This suggests a strong downtrend or fundamental weakness.")
+            
+            if 'trend_regimes' in entry_analysis:
+                regimes = entry_analysis['trend_regimes']
+                total_regime_trades = sum(regimes.values())
+                if total_regime_trades > 0:
+                    if 'downtrend' in regimes:
+                        downtrend_pct = (regimes['downtrend'] / total_regime_trades * 100)
+                        if downtrend_pct > 40:
+                            report.append(f"✗ Fighting the Trend: {downtrend_pct:.0f}% of entries occurred during downtrends.")
+                            report.append("  You bought during declining markets, fighting against the prevailing trend.")
+        
+        # Exit timing analysis for worst stock
+        exit_analysis = worst_data['exit_analysis']
+        if exit_analysis:
+            if 'avg_holding_duration' in exit_analysis:
+                duration = exit_analysis['avg_holding_duration']
+                if duration > 15:
+                    report.append(f"✗ Holding Losers Too Long: Average holding period was {duration:.1f} days.")
+                    report.append("  You held losing positions too long, allowing losses to compound.")
+                elif duration < 1:
+                    report.append(f"⚠ Premature Exits: Average holding period was {duration:.1f} days.")
+                    report.append("  You exited positions too quickly, potentially missing recovery opportunities.")
+        
+        # Compare with best stock
+        report.append("")
+        report.append("-" * 80)
+        report.append("KEY DIFFERENCES BETWEEN BEST AND WORST PERFORMERS:")
+        report.append("-" * 80)
+        report.append("")
+        
+        best_entry = best_data['entry_analysis']
+        worst_entry = worst_data['entry_analysis']
+        
+        if 'avg_rsi' in best_entry and 'avg_rsi' in worst_entry:
+            rsi_diff = best_entry['avg_rsi'] - worst_entry['avg_rsi']
+            if abs(rsi_diff) > 10:
+                report.append(f"• Entry RSI Difference: Best stock entered at RSI {best_entry['avg_rsi']:.1f} vs worst at {worst_entry['avg_rsi']:.1f}.")
+                report.append("  Better entry timing (lower RSI) contributed to the best stock's success.")
+        
+        if best_data['avg_holding_duration'] > 0 and worst_data['avg_holding_duration'] > 0:
+            duration_diff = best_data['avg_holding_duration'] - worst_data['avg_holding_duration']
+            if abs(duration_diff) > 2:
+                report.append(f"• Holding Duration: Best stock held for {best_data['avg_holding_duration']:.1f} days vs worst at {worst_data['avg_holding_duration']:.1f} days.")
+                report.append("  Different holding strategies may have impacted results.")
+        
+        if best_data['win_rate'] > worst_data['win_rate'] + 20:
+            report.append(f"• Win Rate: Best stock had {best_data['win_rate']:.1f}% win rate vs worst at {worst_data['win_rate']:.1f}%.")
+            report.append("  The best stock had significantly more winning trades.")
+        
+        report.append("")
+        report.append("=" * 80)
+        report.append("RECOMMENDATIONS:")
+        report.append("=" * 80)
+        report.append("")
+        report.append("Based on this analysis:")
+        report.append("")
+        
+        # Generate recommendations
+        if 'avg_rsi' in worst_entry and worst_entry['avg_rsi'] > 65:
+            report.append("1. Improve Entry Timing: Avoid buying when RSI > 65 (overbought).")
+            report.append("   Wait for pullbacks or oversold conditions (RSI < 35) for better entries.")
+        
+        if 'avg_ema20_distance' in worst_entry:
+            ema_dist = worst_entry['avg_ema20_distance']
+            ema_pct = ema_dist if abs(ema_dist) > 1 else ema_dist * 100
+            if ema_pct > 3:
+                report.append("2. Avoid Chasing: Don't buy stocks more than 3% above their EMA(20).")
+                report.append("   Wait for prices to pull back closer to the moving average.")
+        
+        if worst_data['win_rate'] < 30:
+            report.append("3. Review Trade Selection: Low win rate suggests poor stock selection or timing.")
+            report.append("   Consider focusing on stocks with better technical setups and fundamentals.")
+        
+        if worst_data['avg_holding_duration'] > 10 and worst_data['total_pnl'] < 0:
+            report.append("4. Cut Losses Faster: Don't hold losing positions too long.")
+            report.append("   Set stop-losses to limit downside and preserve capital.")
+        
+        report.append("")
+        report.append("=" * 80)
+        
+        return "\n".join(report)
 

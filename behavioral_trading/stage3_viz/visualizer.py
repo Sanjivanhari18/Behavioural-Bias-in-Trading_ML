@@ -7,6 +7,7 @@ import seaborn as sns
 import plotly.graph_objects as go
 import plotly.express as px
 from plotly.subplots import make_subplots
+from sklearn.decomposition import PCA
 from typing import Dict, Optional
 import logging
 import html
@@ -34,7 +35,6 @@ class BehavioralVisualizer:
             row_heights=[0.7, 0.3]
         )
         
-        # Behavioral clusters timeline
         fig.add_trace(
             go.Scatter(
                 x=features['date'],
@@ -53,13 +53,11 @@ class BehavioralVisualizer:
             row=1, col=1
         )
         
-        # Mark change points
         if change_points and len(change_points) > 0:
             for cp_idx in change_points:
                 if cp_idx < len(features):
                     try:
                         change_date = features.iloc[cp_idx]['date']
-                        # Add vertical line with annotation
                         fig.add_vline(
                             x=change_date,
                             line_dash="dash",
@@ -69,7 +67,6 @@ class BehavioralVisualizer:
                             annotation_position="top",
                             row=1, col=1
                         )
-                        # Also add to bottom panel for visibility
                         fig.add_vline(
                             x=change_date,
                             line_dash="dash",
@@ -81,7 +78,6 @@ class BehavioralVisualizer:
                         logger.warning(f"Could not add change point at index {cp_idx}: {e}")
                         continue
         
-        # Market regime overlay (use volatility as proxy for market conditions)
         if 'volatility_rolling_std' in features.columns:
             fig.add_trace(
                 go.Scatter(
@@ -115,7 +111,6 @@ class BehavioralVisualizer:
             )
         )
         
-        # Position size vs volatility
         if 'position_size_normalized_by_volatility' in features.columns and 'volatility_rolling_std' in features.columns:
             fig.add_trace(
                 go.Scatter(
@@ -135,7 +130,6 @@ class BehavioralVisualizer:
                 row=1, col=1
             )
         
-        # Trade frequency vs RSI
         if 'trades_per_day' in features.columns and 'rsi_14' in features.columns:
             fig.add_trace(
                 go.Scatter(
@@ -149,7 +143,6 @@ class BehavioralVisualizer:
                 row=1, col=2
             )
         
-        # Holding duration vs volatility
         if 'holding_duration_vs_volatility' in features.columns:
             fig.add_trace(
                 go.Scatter(
@@ -162,10 +155,8 @@ class BehavioralVisualizer:
                 ),
                 row=2, col=1
             )
-            # Add baseline line
             fig.add_hline(y=0, line_dash="dash", line_color="gray", row=2, col=1)
         
-        # Overall deviation score
         if 'overall_deviation_score' in features.columns:
             fig.add_trace(
                 go.Scatter(
@@ -202,7 +193,6 @@ class BehavioralVisualizer:
             row_heights=[0.5, 0.5]
         )
         
-        # Check if we have loss data - use realized_pnl < 0 if is_loss doesn't exist
         if 'is_loss' in features.columns:
             loss_mask = features['is_loss'] == 1
         elif 'realized_pnl' in features.columns:
@@ -210,7 +200,6 @@ class BehavioralVisualizer:
         else:
             loss_mask = pd.Series([False] * len(features), index=features.index)
         
-        # Trades after loss
         if loss_mask.any() and 'trades_after_loss' in features.columns:
             loss_data = features[loss_mask].copy()
             loss_data = loss_data[loss_data['trades_after_loss'].notna()]
@@ -227,8 +216,6 @@ class BehavioralVisualizer:
                     row=1, col=1
                 )
         
-        # Risk escalation (position size after loss)
-        # Use position_size_normalized_by_volatility for trades after losses
         if loss_mask.any() and 'position_size_normalized_by_volatility' in features.columns:
             loss_data = features[loss_mask].copy()
             loss_data = loss_data[loss_data['position_size_normalized_by_volatility'].notna()]
@@ -247,7 +234,6 @@ class BehavioralVisualizer:
                     row=2, col=1
                 )
         
-        # Update axes with better date formatting
         fig.update_xaxes(
             title_text="Date",
             tickangle=-45,
@@ -276,16 +262,13 @@ class BehavioralVisualizer:
     def create_performance_matrix(self, features: pd.DataFrame, clusters: np.ndarray, 
                                  n_clusters: int = 3) -> go.Figure:
         """Create regime performance matrix."""
-        # Create matrix: market regimes x behavioral clusters
         volatility_regimes = ['low', 'medium', 'high']
         trend_regimes = ['uptrend', 'downtrend', 'sideways']
         
-        # Build matrix data: rows = regimes, cols = clusters
         matrix_pnl = []
         matrix_winrate = []
         regime_labels = []
         
-        # Check which regime columns exist
         has_vol_regime = 'volatility_regime' in features.columns
         has_trend_regime = 'trend_regime' in features.columns
         has_pnl = 'realized_pnl' in features.columns
@@ -303,7 +286,6 @@ class BehavioralVisualizer:
             self.figures['performance_matrix'] = fig
             return fig
         
-        # Use volatility regime as primary (or trend if vol not available)
         if has_vol_regime:
             regimes_to_use = volatility_regimes
             regime_col = 'volatility_regime'
@@ -311,7 +293,6 @@ class BehavioralVisualizer:
             regimes_to_use = trend_regimes
             regime_col = 'trend_regime'
         
-        # Build matrix
         for regime in regimes_to_use:
             regime_mask = features[regime_col] == regime
             if not regime_mask.any():
@@ -338,11 +319,9 @@ class BehavioralVisualizer:
                 matrix_winrate.append(row_winrate)
                 regime_labels.append(regime.title())
         
-        # Create heatmap with P&L
         if matrix_pnl and len(matrix_pnl) > 0:
             cluster_labels = [f'Cluster {i}' for i in range(n_clusters)]
             
-            # Create text annotations with both P&L and win rate
             text_matrix = []
             for i, row_pnl in enumerate(matrix_pnl):
                 text_row = []
@@ -376,7 +355,6 @@ class BehavioralVisualizer:
             self.figures['performance_matrix'] = fig
             return fig
         
-        # Fallback: empty figure
         fig = go.Figure()
         fig.add_annotation(
             text="No data available for performance matrix",
@@ -401,13 +379,10 @@ class BehavioralVisualizer:
         """
         fig = go.Figure()
         
-        # Get unique clusters
         unique_clusters = np.unique(clusters)
         
-        # Color palette for clusters
         colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8c564b']
         
-        # Plot each cluster separately
         for cluster_id in unique_clusters:
             cluster_mask = clusters == cluster_id
             cluster_data = features.loc[cluster_mask]
@@ -1056,15 +1031,818 @@ class BehavioralVisualizer:
         self.figures['stability_scorecard'] = fig
         return fig
     
+    def create_cluster_scatter_plot(self, features: pd.DataFrame, clusters: np.ndarray, 
+                                    cluster_centers: np.ndarray, cluster_analysis: Dict) -> go.Figure:
+        """
+        Create a 2D scatter plot showing behavioral clusters with circles around each cluster.
+        
+        Args:
+            features: DataFrame with trade features
+            clusters: Cluster labels for each trade
+            cluster_centers: Cluster center coordinates in original feature space
+            cluster_analysis: Dictionary with cluster analysis information
+            
+        Returns:
+            Plotly figure with cluster scatter plot
+        """
+        from sklearn.preprocessing import StandardScaler
+        
+        # Get feature columns (same as used in clustering)
+        exclude = ['date', 'symbol', 'side', 'price', 'quantity', 'rsi_14', 'ema_20', 
+                  'ema_50', 'Close', 'Date', 'date_only', 'trend_regime', 'volatility_regime']
+        
+        feature_cols = [col for col in features.columns 
+                       if col not in exclude and features[col].dtype in [np.float64, np.int64]]
+        
+        # Limit to top 20 features
+        priority_features = [
+            'trades_per_day', 'trades_per_rolling_7days', 'trades_per_rolling_30days',
+            'position_size_dollar_value', 'position_size_normalized_by_volatility',
+            'holding_duration_days', 'holding_duration_vs_volatility',
+            'time_gap_hours_since_last_trade', 'time_gap_days_since_last_trade',
+            'entry_price_distance_from_ema20', 'entry_price_distance_from_ema50',
+            'exit_price_distance_from_ema20', 'exit_price_distance_from_ema50'
+        ]
+        
+        ordered = [f for f in priority_features if f in feature_cols]
+        ordered.extend([f for f in feature_cols if f not in ordered])
+        feature_cols = ordered[:20]
+        
+        # Prepare feature matrix
+        X = features[feature_cols].fillna(0).values
+        
+        # Scale features
+        scaler = StandardScaler()
+        X_scaled = scaler.fit_transform(X)
+        
+        # Reduce to 2D using PCA
+        pca = PCA(n_components=2, random_state=42)
+        X_2d = pca.fit_transform(X_scaled)
+        
+        # Transform cluster centers to 2D
+        cluster_centers_scaled = scaler.transform(cluster_centers)
+        centers_2d = pca.transform(cluster_centers_scaled)
+        
+        # Shift all points to positive quadrant (first quadrant only)
+        # Find minimum values and shift
+        min_x = np.min(X_2d[:, 0])
+        min_y = np.min(X_2d[:, 1])
+        min_center_x = np.min(centers_2d[:, 0])
+        min_center_y = np.min(centers_2d[:, 1])
+        
+        # Use the most negative value to shift everything to positive
+        shift_x = abs(min(min_x, min_center_x)) + 0.1  # Add small padding
+        shift_y = abs(min(min_y, min_center_y)) + 0.1  # Add small padding
+        
+        # Shift all points to positive quadrant
+        X_2d[:, 0] = X_2d[:, 0] + shift_x
+        X_2d[:, 1] = X_2d[:, 1] + shift_y
+        centers_2d[:, 0] = centers_2d[:, 0] + shift_x
+        centers_2d[:, 1] = centers_2d[:, 1] + shift_y
+        
+        # Define colors for clusters
+        cluster_colors = {
+            0: '#FF6B6B',  # Red
+            1: '#4ECDC4',  # Blue
+            2: '#95E1D3',  # Green
+            3: '#FFE66D',  # Yellow
+            4: '#A8E6CF'   # Light Green
+        }
+        
+        fig = go.Figure()
+        
+        # Calculate circle radii for each cluster
+        unique_clusters = np.unique(clusters)
+        cluster_radii = {}
+        
+        for cluster_id in unique_clusters:
+            cluster_mask = clusters == cluster_id
+            cluster_points = X_2d[cluster_mask]
+            
+            if len(cluster_points) > 0:
+                center = centers_2d[cluster_id]
+                # Calculate maximum distance from center to any point in cluster
+                distances = np.sqrt(np.sum((cluster_points - center) ** 2, axis=1))
+                max_distance = np.max(distances) if len(distances) > 0 else 1.0
+                # Add 10% padding
+                cluster_radii[cluster_id] = max_distance * 1.1
+        
+        # Draw cluster circles (background layer)
+        for cluster_id in unique_clusters:
+            center = centers_2d[cluster_id]
+            radius = cluster_radii.get(cluster_id, 1.0)
+            color = cluster_colors.get(cluster_id % len(cluster_colors), '#CCCCCC')
+            
+            # Create circle using scatter plot with many points
+            theta = np.linspace(0, 2 * np.pi, 100)
+            circle_x = center[0] + radius * np.cos(theta)
+            circle_y = center[1] + radius * np.sin(theta)
+            
+            fig.add_trace(go.Scatter(
+                x=circle_x,
+                y=circle_y,
+                mode='lines',
+                name=f'Cluster {cluster_id} Area',
+                line=dict(color=color, width=2, dash='dash'),
+                fill='toself',
+                fillcolor=color,
+                opacity=0.15,
+                showlegend=False,
+                hoverinfo='skip'
+            ))
+        
+        # Plot data points colored by cluster
+        for cluster_id in unique_clusters:
+            cluster_mask = clusters == cluster_id
+            cluster_points = X_2d[cluster_mask]
+            cluster_features = features.loc[cluster_mask]
+            
+            color = cluster_colors.get(cluster_id % len(cluster_colors), '#CCCCCC')
+            
+            # Get cluster info
+            cluster_info = cluster_analysis.get(f'cluster_{cluster_id}', {})
+            cluster_size = cluster_info.get('size', cluster_mask.sum())
+            avg_pnl = cluster_info.get('avg_pnl', 0)
+            win_rate = cluster_info.get('win_rate', 0) * 100
+            
+            # Create hover text
+            hover_texts = []
+            for idx, (_, row) in enumerate(cluster_features.iterrows()):
+                hover_text = f"<b>Cluster {cluster_id}</b><br>"
+                if 'date' in row:
+                    hover_text += f"Date: {row['date']}<br>"
+                if 'symbol' in row:
+                    hover_text += f"Symbol: {row.get('symbol', 'N/A')}<br>"
+                if 'realized_pnl' in row:
+                    hover_text += f"P&L: ${row['realized_pnl']:.2f}<br>"
+                hover_text += f"Cluster: {cluster_id}"
+                hover_texts.append(hover_text)
+            
+            fig.add_trace(go.Scatter(
+                x=cluster_points[:, 0],
+                y=cluster_points[:, 1],
+                mode='markers',
+                name=f'Cluster {cluster_id} ({cluster_size} trades)',
+                marker=dict(
+                    size=8,
+                    color=color,
+                    line=dict(width=1, color='white'),
+                    opacity=0.7
+                ),
+                text=hover_texts,
+                hovertemplate='%{text}<extra></extra>',
+                legendgroup=f'cluster_{cluster_id}'
+            ))
+        
+        # Plot cluster centers (large, distinct markers)
+        for cluster_id in unique_clusters:
+            center = centers_2d[cluster_id]
+            color = cluster_colors.get(cluster_id % len(cluster_colors), '#CCCCCC')
+            
+            cluster_info = cluster_analysis.get(f'cluster_{cluster_id}', {})
+            avg_pnl = cluster_info.get('avg_pnl', 0)
+            win_rate = cluster_info.get('win_rate', 0) * 100
+            
+            fig.add_trace(go.Scatter(
+                x=[center[0]],
+                y=[center[1]],
+                mode='markers+text',
+                name=f'Cluster {cluster_id} Center',
+                marker=dict(
+                    size=25,
+                    color=color,
+                    symbol='star',
+                    line=dict(width=2, color='white'),
+                    opacity=0.9
+                ),
+                text=[f'C{cluster_id}'],
+                textposition='middle center',
+                textfont=dict(size=12, color='white', family='Arial Black'),
+                hovertemplate=(
+                    f'<b>Cluster {cluster_id} Center</b><br>'
+                    f'Avg P&L: ${avg_pnl:.2f}<br>'
+                    f'Win Rate: {win_rate:.1f}%<br>'
+                    f'Size: {cluster_info.get("size", 0)} trades<extra></extra>'
+                ),
+                legendgroup=f'cluster_{cluster_id}',
+                showlegend=False
+            ))
+        
+        # Calculate explained variance
+        explained_var = pca.explained_variance_ratio_
+        total_variance = explained_var.sum() * 100
+        
+        # Update layout - ensure axes start at 0 (positive quadrant only)
+        fig.update_layout(
+            title=dict(
+                text=f'Behavioral Cluster Scatter Plot (Positive Quadrant)<br><sub>2D projection (explains {total_variance:.1f}% of variance)</sub>',
+                x=0.5,
+                xanchor='center'
+            ),
+            xaxis=dict(
+                title='Principal Component 1',
+                showgrid=True,
+                gridcolor='rgba(128, 128, 128, 0.2)',
+                range=[0, None]  # Start at 0 (positive quadrant)
+            ),
+            yaxis=dict(
+                title='Principal Component 2',
+                showgrid=True,
+                gridcolor='rgba(128, 128, 128, 0.2)',
+                range=[0, None]  # Start at 0 (positive quadrant)
+            ),
+            hovermode='closest',
+            height=800,
+            width=1200,
+            legend=dict(
+                orientation="v",
+                yanchor="top",
+                y=1,
+                xanchor="left",
+                x=1.02,
+                bgcolor='rgba(255, 255, 255, 0.8)',
+                bordercolor='rgba(0, 0, 0, 0.2)',
+                borderwidth=1
+            ),
+            plot_bgcolor='white',
+            paper_bgcolor='white'
+        )
+        
+        self.figures['cluster_scatter'] = fig
+        return fig
+    
+    def create_volatility_trade_timeline(self, features: pd.DataFrame, 
+                                        market_data_fetcher=None) -> go.Figure:
+        """
+        Create volatility timeline visualization showing volatility over time with buy/sell markers.
+        
+        For each stock traded:
+        - Line graph showing volatility over time (full timeline)
+        - Green dots: Buy trades
+        - Red dots: Sell trades
+        
+        Args:
+            features: DataFrame with trade features including date, symbol, side, volatility
+            market_data_fetcher: Optional MarketDataFetcher instance to get full volatility data
+            
+        Returns:
+            Plotly figure with volatility timeline
+        """
+        if 'symbol' not in features.columns or 'date' not in features.columns:
+            logger.warning("Missing 'symbol' or 'date' columns. Cannot create volatility timeline.")
+            return go.Figure()
+        
+        if 'volatility_rolling_std' not in features.columns:
+            logger.warning("Missing 'volatility_rolling_std' column. Cannot create volatility timeline.")
+            return go.Figure()
+        
+        # Get unique symbols
+        symbols = features['symbol'].dropna().unique()
+        symbols = sorted([s for s in symbols if pd.notna(s)])
+        
+        if len(symbols) == 0:
+            logger.warning("No symbols found. Cannot create volatility timeline.")
+            return go.Figure()
+        
+        # Calculate number of rows for subplots (max 3 per row)
+        n_symbols = len(symbols)
+        n_rows = (n_symbols + 2) // 3  # Round up
+        
+        # Create subplots
+        fig = make_subplots(
+            rows=n_rows,
+            cols=3,
+            subplot_titles=[f'{symbol} - Volatility & Trades' for symbol in symbols],
+            vertical_spacing=0.12,
+            horizontal_spacing=0.1
+        )
+        
+        # Color palette for different symbols (if needed for line)
+        colors = px.colors.qualitative.Set3
+        
+        for idx, symbol in enumerate(symbols):
+            row = (idx // 3) + 1
+            col = (idx % 3) + 1
+            
+            # Get data for this symbol
+            symbol_data = features[features['symbol'] == symbol].copy()
+            symbol_data = symbol_data.sort_values('date')
+            
+            if len(symbol_data) == 0:
+                continue
+            
+            # Get date range for this symbol
+            min_date = symbol_data['date'].min()
+            max_date = symbol_data['date'].max()
+            
+            # Try to get full volatility data if market_data_fetcher is available
+            volatility_timeline = None
+            if market_data_fetcher is not None:
+                try:
+                    # Fetch full OHLCV data for the symbol
+                    ohlcv = market_data_fetcher.fetch_ohlcv(
+                        symbol, 
+                        start_date=min_date.strftime('%Y-%m-%d') if hasattr(min_date, 'strftime') else str(min_date)[:10],
+                        end_date=max_date.strftime('%Y-%m-%d') if hasattr(max_date, 'strftime') else str(max_date)[:10]
+                    )
+                    if 'volatility_rolling_std' in ohlcv.columns:
+                        volatility_timeline = ohlcv[['Date', 'volatility_rolling_std']].copy()
+                        volatility_timeline = volatility_timeline.rename(columns={'Date': 'date'})
+                except Exception as e:
+                    logger.warning(f"Could not fetch full volatility data for {symbol}: {e}")
+            
+            # If we don't have full timeline, use trade dates only
+            if volatility_timeline is None or len(volatility_timeline) == 0:
+                volatility_timeline = symbol_data[['date', 'volatility_rolling_std']].dropna()
+            
+            if len(volatility_timeline) == 0:
+                continue
+            
+            # Sort by date
+            volatility_timeline = volatility_timeline.sort_values('date')
+            
+            # Plot volatility line
+            fig.add_trace(
+                go.Scatter(
+                    x=volatility_timeline['date'],
+                    y=volatility_timeline['volatility_rolling_std'],
+                    mode='lines',
+                    name=f'{symbol} Volatility',
+                    line=dict(color='#2E86AB', width=2),
+                    hovertemplate=f'<b>{symbol}</b><br>Date: %{{x}}<br>Volatility: %{{y:.4f}}<extra></extra>',
+                    showlegend=False
+                ),
+                row=row, col=col
+            )
+            
+            # Separate buy and sell trades
+            buy_trades = symbol_data[symbol_data.get('side', '') == 'buy']
+            sell_trades = symbol_data[symbol_data.get('side', '') == 'sell']
+            
+            # Plot buy trades (green dots)
+            if len(buy_trades) > 0:
+                buy_volatility = buy_trades[['date', 'volatility_rolling_std', 'price', 'quantity']].dropna(subset=['volatility_rolling_std'])
+                
+                if len(buy_volatility) > 0:
+                    hover_texts_buy = []
+                    for _, trade in buy_volatility.iterrows():
+                        hover_text = f"<b>BUY {symbol}</b><br>"
+                        hover_text += f"Date: {trade['date']}<br>"
+                        hover_text += f"Volatility: {trade['volatility_rolling_std']:.4f}<br>"
+                        if 'price' in trade:
+                            hover_text += f"Price: ${trade['price']:.2f}<br>"
+                        if 'quantity' in trade:
+                            hover_text += f"Quantity: {trade['quantity']}"
+                        hover_texts_buy.append(hover_text)
+                    
+                    fig.add_trace(
+                        go.Scatter(
+                            x=buy_volatility['date'],
+                            y=buy_volatility['volatility_rolling_std'],
+                            mode='markers',
+                            name=f'{symbol} Buy',
+                            marker=dict(
+                                color='#28A745',  # Green
+                                size=10,
+                                symbol='circle',
+                                line=dict(width=1, color='white')
+                            ),
+                            text=hover_texts_buy,
+                            hovertemplate='%{text}<extra></extra>',
+                            showlegend=False
+                        ),
+                        row=row, col=col
+                    )
+            
+            # Plot sell trades (red dots)
+            if len(sell_trades) > 0:
+                sell_volatility = sell_trades[['date', 'volatility_rolling_std', 'price', 'quantity', 'realized_pnl']].dropna(subset=['volatility_rolling_std'])
+                
+                if len(sell_volatility) > 0:
+                    hover_texts_sell = []
+                    for _, trade in sell_volatility.iterrows():
+                        hover_text = f"<b>SELL {symbol}</b><br>"
+                        hover_text += f"Date: {trade['date']}<br>"
+                        hover_text += f"Volatility: {trade['volatility_rolling_std']:.4f}<br>"
+                        if 'price' in trade:
+                            hover_text += f"Price: ${trade['price']:.2f}<br>"
+                        if 'quantity' in trade:
+                            hover_text += f"Quantity: {trade['quantity']}<br>"
+                        if 'realized_pnl' in trade and pd.notna(trade['realized_pnl']):
+                            hover_text += f"P&L: ${trade['realized_pnl']:.2f}"
+                        hover_texts_sell.append(hover_text)
+                    
+                    fig.add_trace(
+                        go.Scatter(
+                            x=sell_volatility['date'],
+                            y=sell_volatility['volatility_rolling_std'],
+                            mode='markers',
+                            name=f'{symbol} Sell',
+                            marker=dict(
+                                color='#DC3545',  # Red
+                                size=10,
+                                symbol='circle',
+                                line=dict(width=1, color='white')
+                            ),
+                            text=hover_texts_sell,
+                            hovertemplate='%{text}<extra></extra>',
+                            showlegend=False
+                        ),
+                        row=row, col=col
+                    )
+            
+            # Update axes for this subplot
+            fig.update_xaxes(title_text="Date", row=row, col=col)
+            fig.update_yaxes(title_text="Volatility", row=row, col=col)
+        
+        # Add legend for buy/sell markers (only once)
+        fig.add_trace(
+            go.Scatter(
+                x=[None], y=[None],
+                mode='markers',
+                name='Buy',
+                marker=dict(color='#28A745', size=10),
+                showlegend=True
+            )
+        )
+        fig.add_trace(
+            go.Scatter(
+                x=[None], y=[None],
+                mode='markers',
+                name='Sell',
+                marker=dict(color='#DC3545', size=10),
+                showlegend=True
+            )
+        )
+        
+        # Update layout
+        fig.update_layout(
+            title=dict(
+                text='Volatility Timeline with Trade Markers<br><sub>Green dots = Buy, Red dots = Sell</sub>',
+                x=0.5,
+                xanchor='center'
+            ),
+            height=300 * n_rows,
+            hovermode='closest',
+            legend=dict(
+                orientation="h",
+                yanchor="bottom",
+                y=1.02,
+                xanchor="right",
+                x=1
+            )
+        )
+        
+        self.figures['volatility_timeline'] = fig
+        return fig
+    
+    def create_sp500_volatility_timeline(self, features: pd.DataFrame, 
+                                        market_data_fetcher=None) -> go.Figure:
+        """
+        Create S&P 500 volatility timeline with buy/sell trade markers.
+        
+        Shows:
+        - S&P 500 volatility over time (line graph, normalized 0-100)
+        - Green dots: Buy trades with stock name labels
+        - Red dots: Sell trades with stock name labels
+        
+        Args:
+            features: DataFrame with trade features including date, symbol, side
+            market_data_fetcher: Optional MarketDataFetcher instance to get S&P 500 data
+            
+        Returns:
+            Plotly figure with S&P 500 volatility timeline
+        """
+        if 'date' not in features.columns or 'symbol' not in features.columns:
+            logger.warning("Missing 'date' or 'symbol' columns. Cannot create S&P 500 volatility timeline.")
+            return go.Figure()
+        
+        # Get date range from trades
+        min_date = features['date'].min()
+        max_date = features['date'].max()
+        
+        # Convert dates to strings if needed
+        if hasattr(min_date, 'strftime'):
+            start_date = min_date.strftime('%Y-%m-%d')
+            end_date = max_date.strftime('%Y-%m-%d')
+        else:
+            start_date = str(min_date)[:10]
+            end_date = str(max_date)[:10]
+        
+        # Fetch S&P 500 data
+        sp500_data = None
+        if market_data_fetcher is not None:
+            try:
+                # Fetch S&P 500 data (^GSPC is the Yahoo Finance symbol)
+                sp500_ohlcv = market_data_fetcher.fetch_ohlcv('^GSPC', start_date, end_date)
+                
+                # Calculate volatility
+                sp500_ohlcv = market_data_fetcher.calculate_market_indicators(sp500_ohlcv)
+                
+                if 'volatility_rolling_std' in sp500_ohlcv.columns:
+                    # Handle date column - yfinance returns date as index
+                    sp500_data = sp500_ohlcv.copy()
+                    if sp500_data.index.name == 'Date' or isinstance(sp500_data.index, pd.DatetimeIndex):
+                        sp500_data = sp500_data.reset_index()
+                        # Find date column (could be 'Date' or index name)
+                        date_col = None
+                        for col in ['Date', 'date', sp500_data.index.name]:
+                            if col in sp500_data.columns:
+                                date_col = col
+                                break
+                        if date_col:
+                            sp500_data = sp500_data.rename(columns={date_col: 'date'})
+                        else:
+                            # If no date column found, use index
+                            sp500_data['date'] = sp500_data.index
+                    elif 'Date' in sp500_data.columns:
+                        sp500_data = sp500_data.rename(columns={'Date': 'date'})
+                    
+                    sp500_data = sp500_data[['date', 'volatility_rolling_std']].copy()
+                    sp500_data = sp500_data.dropna()
+            except Exception as e:
+                logger.warning(f"Could not fetch S&P 500 data: {e}")
+                import traceback
+                logger.debug(traceback.format_exc())
+        
+        if sp500_data is None or len(sp500_data) == 0:
+            logger.warning("No S&P 500 data available. Cannot create visualization.")
+            return go.Figure()
+        
+        # Normalize volatility to 0-100 range
+        vol_min = sp500_data['volatility_rolling_std'].min()
+        vol_max = sp500_data['volatility_rolling_std'].max()
+        vol_range = vol_max - vol_min
+        
+        if vol_range > 0:
+            sp500_data['volatility_normalized'] = (
+                (sp500_data['volatility_rolling_std'] - vol_min) / vol_range * 100
+            )
+        else:
+            sp500_data['volatility_normalized'] = 50.0  # Default to middle if no range
+        
+        # Sort by date
+        sp500_data = sp500_data.sort_values('date')
+        
+        # Create figure
+        fig = go.Figure()
+        
+        # Plot S&P 500 volatility line
+        fig.add_trace(
+            go.Scatter(
+                x=sp500_data['date'],
+                y=sp500_data['volatility_normalized'],
+                mode='lines',
+                name='S&P 500 Volatility',
+                line=dict(
+                    color='#1E88E5',
+                    width=3,
+                    shape='spline'  # Smooth line
+                ),
+                fill='tozeroy',
+                fillcolor='rgba(30, 136, 229, 0.1)',
+                hovertemplate=(
+                    '<b>S&P 500 Volatility</b><br>'
+                    'Date: %{x}<br>'
+                    'Volatility: %{y:.2f}/100<br>'
+                    'Raw: %{customdata:.4f}<extra></extra>'
+                ),
+                customdata=sp500_data['volatility_rolling_std']
+            )
+        )
+        
+        # Prepare trade data
+        trades_sorted = features.sort_values('date').copy()
+        
+        # Separate buy and sell trades
+        if 'side' in trades_sorted.columns:
+            # Handle case where side might have NaN values
+            side_col = trades_sorted['side'].astype(str).str.lower().str.strip()
+            # Filter out 'nan' strings that come from actual NaN values
+            buy_trades = trades_sorted[(side_col == 'buy') & (side_col != 'nan')].copy()
+            sell_trades = trades_sorted[(side_col == 'sell') & (side_col != 'nan')].copy()
+            
+            logger.info(f"S&P 500 visualization: Found {len(buy_trades)} buy trades and {len(sell_trades)} sell trades")
+        else:
+            logger.warning("'side' column not found in features. Cannot separate buy/sell trades.")
+            buy_trades = pd.DataFrame()
+            sell_trades = pd.DataFrame()
+        
+        # For each trade, find the closest S&P 500 volatility value
+        def get_volatility_for_date(trade_date, sp500_df):
+            """Get volatility value for a trade date (find closest date)."""
+            # Find closest date in S&P 500 data
+            sp500_df = sp500_df.copy()
+            
+            # Ensure dates are datetime and handle timezone
+            if not pd.api.types.is_datetime64_any_dtype(sp500_df['date']):
+                sp500_df['date'] = pd.to_datetime(sp500_df['date'])
+            
+            # Convert trade_date to datetime if needed
+            if not isinstance(trade_date, pd.Timestamp):
+                trade_date = pd.to_datetime(trade_date)
+            
+            # Remove timezone from both if one is tz-aware and the other is not
+            if sp500_df['date'].dt.tz is not None and trade_date.tz is None:
+                sp500_df['date'] = sp500_df['date'].dt.tz_localize(None)
+            elif sp500_df['date'].dt.tz is None and trade_date.tz is not None:
+                trade_date = trade_date.tz_localize(None)
+            elif sp500_df['date'].dt.tz is not None and trade_date.tz is not None:
+                # Both have timezone, normalize to same timezone
+                sp500_df['date'] = sp500_df['date'].dt.tz_convert(None)
+                trade_date = trade_date.tz_localize(None)
+            
+            # Calculate time differences
+            sp500_df['date_diff'] = abs((sp500_df['date'] - trade_date).dt.total_seconds())
+            closest_idx = sp500_df['date_diff'].idxmin()
+            
+            # Check if the closest date is within 7 days (reasonable tolerance)
+            closest_date_diff = sp500_df.loc[closest_idx, 'date_diff'] / (24 * 3600)  # Convert to days
+            if closest_date_diff > 7:
+                logger.debug(f"Closest S&P 500 date is {closest_date_diff:.1f} days away from trade date {trade_date}")
+            
+            return sp500_df.loc[closest_idx, 'volatility_normalized']
+        
+        # Plot buy trades (green dots with stock names)
+        logger.info(f"Attempting to plot {len(buy_trades)} buy trades on S&P 500 chart")
+        if len(buy_trades) > 0:
+            buy_volatilities = []
+            buy_dates = []
+            buy_symbols = []
+            buy_hover_texts = []
+            
+            for _, trade in buy_trades.iterrows():
+                trade_date = trade['date']
+                symbol = trade.get('symbol', 'UNKNOWN')
+                
+                try:
+                    vol_value = get_volatility_for_date(trade_date, sp500_data)
+                    buy_volatilities.append(vol_value)
+                    buy_dates.append(trade_date)
+                    buy_symbols.append(symbol)
+                    
+                    # Create hover text
+                    hover_text = f"<b>BUY {symbol}</b><br>"
+                    hover_text += f"Date: {trade_date}<br>"
+                    hover_text += f"S&P 500 Volatility: {vol_value:.2f}/100<br>"
+                    if 'price' in trade and pd.notna(trade['price']):
+                        hover_text += f"Price: ${trade['price']:.2f}<br>"
+                    if 'quantity' in trade and pd.notna(trade['quantity']):
+                        hover_text += f"Quantity: {trade['quantity']}"
+                    buy_hover_texts.append(hover_text)
+                except Exception as e:
+                    logger.warning(f"Could not get volatility for buy trade {symbol} on {trade_date}: {e}")
+                    continue
+            
+            logger.info(f"Successfully processed {len(buy_volatilities)} buy trades for plotting")
+            if len(buy_volatilities) > 0:
+                fig.add_trace(
+                    go.Scatter(
+                        x=buy_dates,
+                        y=buy_volatilities,
+                        mode='markers+text',
+                        name='Buy Trades',
+                        marker=dict(
+                            color='#28A745',  # Green
+                            size=12,
+                            symbol='circle',
+                            line=dict(width=2, color='white'),
+                            opacity=0.9
+                        ),
+                        text=buy_symbols,
+                        textposition='top center',
+                        textfont=dict(
+                            size=10,
+                            color='#28A745',
+                            family='Arial Black'
+                        ),
+                        customdata=buy_hover_texts,
+                        hovertemplate='%{customdata}<extra></extra>'
+                    )
+                )
+        
+        # Plot sell trades (red dots with stock names)
+        logger.info(f"Attempting to plot {len(sell_trades)} sell trades on S&P 500 chart")
+        if len(sell_trades) > 0:
+            sell_volatilities = []
+            sell_dates = []
+            sell_symbols = []
+            sell_hover_texts = []
+            
+            for _, trade in sell_trades.iterrows():
+                trade_date = trade['date']
+                symbol = trade.get('symbol', 'UNKNOWN')
+                
+                try:
+                    vol_value = get_volatility_for_date(trade_date, sp500_data)
+                    sell_volatilities.append(vol_value)
+                    sell_dates.append(trade_date)
+                    sell_symbols.append(symbol)
+                    
+                    # Create hover text
+                    hover_text = f"<b>SELL {symbol}</b><br>"
+                    hover_text += f"Date: {trade_date}<br>"
+                    hover_text += f"S&P 500 Volatility: {vol_value:.2f}/100<br>"
+                    if 'price' in trade and pd.notna(trade['price']):
+                        hover_text += f"Price: ${trade['price']:.2f}<br>"
+                    if 'quantity' in trade and pd.notna(trade['quantity']):
+                        hover_text += f"Quantity: {trade['quantity']}<br>"
+                    if 'realized_pnl' in trade and pd.notna(trade['realized_pnl']):
+                        pnl_color = 'green' if trade['realized_pnl'] > 0 else 'red'
+                        hover_text += f"P&L: <span style='color:{pnl_color}'>${trade['realized_pnl']:.2f}</span>"
+                    sell_hover_texts.append(hover_text)
+                except Exception as e:
+                    logger.warning(f"Could not get volatility for sell trade {symbol} on {trade_date}: {e}")
+                    continue
+            
+            logger.info(f"Successfully processed {len(sell_volatilities)} sell trades for plotting")
+            if len(sell_volatilities) > 0:
+                fig.add_trace(
+                    go.Scatter(
+                        x=sell_dates,
+                        y=sell_volatilities,
+                        mode='markers+text',
+                        name='Sell Trades',
+                        marker=dict(
+                            color='#DC3545',  # Red
+                            size=12,
+                            symbol='circle',
+                            line=dict(width=2, color='white'),
+                            opacity=0.9
+                        ),
+                        text=sell_symbols,
+                        textposition='bottom center',
+                        textfont=dict(
+                            size=10,
+                            color='#DC3545',
+                            family='Arial Black'
+                        ),
+                        customdata=sell_hover_texts,
+                        hovertemplate='%{customdata}<extra></extra>'
+                    )
+                )
+        
+        # Update layout with beautiful styling
+        fig.update_layout(
+            title=dict(
+                text='S&P 500 Volatility Timeline with Trade Markers<br>'
+                     '<sub>Green dots = Buy trades, Red dots = Sell trades (with stock names)</sub>',
+                x=0.5,
+                xanchor='center',
+                font=dict(size=20, color='#1a1a1a')
+            ),
+            xaxis=dict(
+                title=dict(text='Date', font=dict(size=14, color='#1a1a1a')),
+                showgrid=True,
+                gridcolor='rgba(128, 128, 128, 0.2)',
+                showline=True,
+                linecolor='rgba(128, 128, 128, 0.5)'
+            ),
+            yaxis=dict(
+                title=dict(text='S&P 500 Volatility (Normalized 0-100)', font=dict(size=14, color='#1a1a1a')),
+                showgrid=True,
+                gridcolor='rgba(128, 128, 128, 0.2)',
+                showline=True,
+                linecolor='rgba(128, 128, 128, 0.5)',
+                range=[0, 100]
+            ),
+            hovermode='closest',
+            height=700,
+            width=1400,
+            plot_bgcolor='white',
+            paper_bgcolor='white',
+            legend=dict(
+                orientation="h",
+                yanchor="bottom",
+                y=1.02,
+                xanchor="right",
+                x=1,
+                bgcolor='rgba(255, 255, 255, 0.8)',
+                bordercolor='rgba(0, 0, 0, 0.2)',
+                borderwidth=1,
+                font=dict(size=12)
+            ),
+            margin=dict(l=80, r=80, t=100, b=80)
+        )
+        
+        self.figures['sp500_volatility'] = fig
+        return fig
+    
     def save_all_figures(self, output_dir: str = "output/"):
         """Save all figures to HTML files."""
         import os
         os.makedirs(output_dir, exist_ok=True)
         
         for name, fig in self.figures.items():
-            filepath = os.path.join(output_dir, f"{name}.html")
-            fig.write_html(filepath)
-            logger.info(f"Saved {name} to {filepath}")
+            if isinstance(fig, dict):
+                for sub_name, sub_fig in fig.items():
+                    filepath = os.path.join(output_dir, f"{name}_{sub_name}.html")
+                    sub_fig.write_html(filepath)
+                    logger.info(f"Saved {name}_{sub_name} to {filepath}")
+            else:
+                filepath = os.path.join(output_dir, f"{name}.html")
+                fig.write_html(filepath)
+                logger.info(f"Saved {name} to {filepath}")
     
     def create_unified_dashboard(self, output_dir: str = "output/", 
                                 xai_file: str = "xai_explanation.txt",
@@ -1086,6 +1864,9 @@ class BehavioralVisualizer:
         viz_order = [
             ('regime_timeline', 'Behavioral Regime Timeline', 'Shows how your trading behavior clusters changed over time, with market regime overlays'),
             ('cluster_timeline', 'Cluster Distribution Timeline', 'Distribution of behavioral clusters across your trading period'),
+            ('cluster_scatter', 'Cluster Scatter Plot', '2D visualization of behavioral clusters showing cluster areas and data point grouping (positive quadrant only)'),
+            ('sp500_volatility', 'S&P 500 Volatility with Trades', 'S&P 500 volatility timeline (0-100) with buy (green) and sell (red) trade markers labeled with stock names'),
+            ('volatility_timeline', 'Volatility Timeline with Trades', 'Volatility over time for each stock with buy (green) and sell (red) trade markers'),
             ('trade_journey', 'Trade Journey Timeline', 'Individual trade journeys from entry to exit with P&L'),
             ('signal_scorecard', 'Signal Following Scorecard', 'How well you followed technical indicators (RSI, MACD, EMA)'),
             ('stability_scorecard', 'Behavioral Stability Score', 'Consistency of your trading behavior over time (does not measure skill or profitability)'),
@@ -1356,9 +2137,22 @@ class BehavioralVisualizer:
 <body>
     <div class="nav-menu">
         <h3>Navigation</h3>
-        <a href="#visualizations">Visualizations</a>
+        <a href="#visualizations">All Visualizations</a>
+        <a href="#regime-timeline">Regime Timeline</a>
+        <a href="#cluster-timeline">Cluster Timeline</a>
+        <a href="#cluster-scatter">Cluster Scatter</a>
+        <a href="#sp500-volatility">S&P 500 Volatility</a>
+        <a href="#volatility-timeline">Volatility Timeline</a>
+        <a href="#trade-journey">Trade Journey</a>
+        <a href="#signal-scorecard">Signal Scorecard</a>
+        <a href="#stability-scorecard">Stability Scorecard</a>
+        <a href="#post-event">Post-Loss Analysis</a>
+        <a href="#performance-matrix">Performance Matrix</a>
+        <a href="#deviation-plots">Deviation Plots</a>
+        <a href="#macd-stock-charts">MACD Stock Charts</a>
         <a href="#xai-explanation">XAI Summary</a>
         <a href="#behavioral-report">Full Report</a>
+        <a href="#stock-performance">Stock Performance</a>
     </div>
     
     <div class="container">
@@ -1377,8 +2171,9 @@ class BehavioralVisualizer:
         for viz_name, viz_title, viz_desc in viz_order:
             viz_file = os.path.join(output_dir, f"{viz_name}.html")
             if os.path.exists(viz_file):
+                anchor_id = viz_name.replace('_', '-')
                 html_parts.append(f"""
-                <div class="section">
+                <div class="section" id="{anchor_id}">
                     <h3 class="section-title">{viz_title}</h3>
                     <p class="section-description">{viz_desc}</p>
                     <div class="scale-info">
@@ -1387,6 +2182,37 @@ class BehavioralVisualizer:
                     <div class="viz-container">
                         <iframe src="{viz_name}.html" title="{viz_title}"></iframe>
                     </div>
+                </div>
+""")
+        
+        # Add MACD stock charts section
+        macd_files = []
+        for file in os.listdir(output_dir):
+            if file.startswith('macd_stock_charts_') and file.endswith('.html'):
+                macd_files.append(file)
+        
+        if macd_files:
+            html_parts.append("""
+                <div class="section" id="macd-stock-charts">
+                    <h2 class="section-title">MACD Charts by Stock</h2>
+                    <p class="section-description">MACD Fast and Slow lines for each stock with buy (green) and sell (red) trade markers on the fast line.</p>
+""")
+            for macd_file in sorted(macd_files):
+                stock_symbol = macd_file.replace('macd_stock_charts_', '').replace('.html', '')
+                anchor_id = f"macd-{stock_symbol.lower()}"
+                html_parts.append(f"""
+                    <div class="section" id="{anchor_id}">
+                        <h3 class="section-title">{stock_symbol} - MACD Chart</h3>
+                        <p class="section-description">MACD Fast Line (blue) and Slow Line (purple) with trade markers</p>
+                        <div class="scale-info">
+                            <strong>Note:</strong> X-axis shows days (positive), Y-axis shows MACD values (positive and negative). Green dots = Buy trades, Red dots = Sell trades.
+                        </div>
+                        <div class="viz-container">
+                            <iframe src="{macd_file}" title="{stock_symbol} MACD Chart"></iframe>
+                        </div>
+                    </div>
+""")
+            html_parts.append("""
                 </div>
 """)
         
@@ -1409,6 +2235,31 @@ class BehavioralVisualizer:
             </div>
         </div>
         
+        <div id="stock-performance">
+            <div class="section">
+                <h2 class="section-title">Stock Performance Analysis</h2>
+                <p class="section-description">Detailed analysis of best and worst performing stocks with explanations.</p>
+                <button onclick="downloadFile('stock_performance_analysis.txt')" class="download-btn">Download Stock Performance Report</button>
+                <div class="text-content">""")
+        
+        stock_perf_path = os.path.join(output_dir, "stock_performance_analysis.txt")
+        stock_perf_content = ""
+        if os.path.exists(stock_perf_path):
+            try:
+                with open(stock_perf_path, 'r', encoding='utf-8') as f:
+                    stock_perf_content = f.read()
+            except UnicodeDecodeError:
+                with open(stock_perf_path, 'r', encoding='utf-8', errors='replace') as f:
+                    stock_perf_content = f.read()
+        
+        stock_perf_escaped = html.escape(stock_perf_content) if stock_perf_content else "Stock performance analysis file not found."
+        html_parts.append(stock_perf_escaped)
+        
+        html_parts.append("""
+                </div>
+            </div>
+        </div>
+        
         <div id="behavioral-report">
             <div class="section">
                 <h2 class="section-title">Detailed Behavioral Report</h2>
@@ -1416,7 +2267,6 @@ class BehavioralVisualizer:
                 <button onclick="downloadFile('behavioral_report.txt')" class="download-btn">Download Full Report</button>
                 <div class="text-content">""")
         
-        # Add report content (escape HTML)
         report_escaped = html.escape(report_content) if report_content else "Behavioral report file not found."
         html_parts.append(report_escaped)
         
@@ -1442,4 +2292,198 @@ class BehavioralVisualizer:
         
         logger.info(f"Unified dashboard saved to {dashboard_path}")
         return dashboard_path
+    
+    def create_macd_stock_charts(self, features: pd.DataFrame, market_data_fetcher) -> Dict[str, go.Figure]:
+        """
+        Create MACD charts for each stock showing fast and slow lines with trade markers.
+        
+        Args:
+            features: DataFrame with trade features
+            market_data_fetcher: MarketDataFetcher instance for fetching OHLCV data
+            
+        Returns:
+            Dictionary mapping stock symbols to their MACD chart figures
+        """
+        if 'symbol' not in features.columns:
+            logger.warning("No 'symbol' column found. Cannot create stock-specific MACD charts.")
+            return {}
+        
+        stock_figures = {}
+        unique_symbols = features['symbol'].dropna().unique()
+        
+        for symbol in unique_symbols:
+            try:
+                symbol_trades = features[features['symbol'] == symbol].copy()
+                if len(symbol_trades) == 0:
+                    continue
+                
+                symbol_trades = symbol_trades.sort_values('date')
+                min_date = symbol_trades['date'].min()
+                max_date = symbol_trades['date'].max()
+                
+                if not hasattr(min_date, 'strftime'):
+                    min_date = pd.to_datetime(min_date)
+                if not hasattr(max_date, 'strftime'):
+                    max_date = pd.to_datetime(max_date)
+                
+                start_date = (min_date - pd.Timedelta(days=60)).strftime('%Y-%m-%d')
+                end_date = (max_date + pd.Timedelta(days=1)).strftime('%Y-%m-%d')
+                
+                ohlcv = market_data_fetcher.fetch_ohlcv(symbol, start_date, end_date)
+                if ohlcv is None or len(ohlcv) == 0:
+                    logger.warning(f"Could not fetch OHLCV data for {symbol}")
+                    continue
+                
+                if 'Date' in ohlcv.columns:
+                    ohlcv['date'] = pd.to_datetime(ohlcv['Date'])
+                elif 'date' in ohlcv.columns:
+                    ohlcv['date'] = pd.to_datetime(ohlcv['date'])
+                else:
+                    ohlcv['date'] = pd.to_datetime(ohlcv.index)
+                
+                ohlcv = ohlcv.sort_values('date')
+                
+                if 'Close' not in ohlcv.columns:
+                    logger.warning(f"No 'Close' column in OHLCV data for {symbol}")
+                    continue
+                
+                if ohlcv['date'].dt.tz is not None:
+                    ohlcv['date'] = ohlcv['date'].dt.tz_localize(None)
+                
+                macd_data = market_data_fetcher.compute_macd(ohlcv['Close'], fast_period=12, slow_period=26, signal_period=9)
+                ohlcv['macd_line'] = macd_data['macd_line']
+                ohlcv['macd_signal'] = macd_data['macd_signal']
+                
+                ohlcv = ohlcv.dropna(subset=['macd_line', 'macd_signal'])
+                
+                if len(ohlcv) == 0:
+                    logger.warning(f"No MACD data available for {symbol}")
+                    continue
+                
+                ohlcv = ohlcv.reset_index(drop=True)
+                ohlcv['day'] = range(1, len(ohlcv) + 1)
+                
+                fig = go.Figure()
+                
+                fig.add_trace(go.Scatter(
+                    x=ohlcv['day'].values,
+                    y=ohlcv['macd_line'].values,
+                    mode='lines',
+                    name='MACD Fast Line',
+                    line=dict(color='#2E86AB', width=2),
+                    hovertemplate='Day: %{x}<br>MACD Fast: %{y:.4f}<extra></extra>'
+                ))
+                
+                fig.add_trace(go.Scatter(
+                    x=ohlcv['day'].values,
+                    y=ohlcv['macd_signal'].values,
+                    mode='lines',
+                    name='MACD Slow Line',
+                    line=dict(color='#A23B72', width=2),
+                    hovertemplate='Day: %{x}<br>MACD Slow: %{y:.4f}<extra></extra>'
+                ))
+                
+                if 'side' in symbol_trades.columns:
+                    side_col = symbol_trades['side'].astype(str).str.lower().str.strip()
+                    buy_trades = symbol_trades[(side_col == 'buy') & (side_col != 'nan')].copy()
+                    sell_trades = symbol_trades[(side_col == 'sell') & (side_col != 'nan')].copy()
+                    
+                    buy_days = []
+                    buy_macd_values = []
+                    for _, trade in buy_trades.iterrows():
+                        trade_date = pd.to_datetime(trade['date'])
+                        if trade_date.tz is not None:
+                            trade_date = trade_date.tz_localize(None)
+                        
+                        date_diffs = abs(ohlcv['date'] - trade_date)
+                        closest_idx = date_diffs.idxmin()
+                        if date_diffs.loc[closest_idx] <= pd.Timedelta(days=7):
+                            buy_days.append(ohlcv.loc[closest_idx, 'day'])
+                            buy_macd_values.append(ohlcv.loc[closest_idx, 'macd_line'])
+                    
+                    if len(buy_days) > 0:
+                        fig.add_trace(go.Scatter(
+                            x=buy_days,
+                            y=buy_macd_values,
+                            mode='markers',
+                            name='Buy Trades',
+                            marker=dict(
+                                color='#28A745',
+                                size=12,
+                                symbol='circle',
+                                line=dict(width=2, color='white'),
+                                opacity=0.9
+                            ),
+                            hovertemplate=f'<b>BUY {symbol}</b><br>Day: %{{x}}<br>MACD Fast: %{{y:.4f}}<extra></extra>'
+                        ))
+                    
+                    sell_days = []
+                    sell_macd_values = []
+                    for _, trade in sell_trades.iterrows():
+                        trade_date = pd.to_datetime(trade['date'])
+                        if trade_date.tz is not None:
+                            trade_date = trade_date.tz_localize(None)
+                        
+                        date_diffs = abs(ohlcv['date'] - trade_date)
+                        closest_idx = date_diffs.idxmin()
+                        if date_diffs.loc[closest_idx] <= pd.Timedelta(days=7):
+                            sell_days.append(ohlcv.loc[closest_idx, 'day'])
+                            sell_macd_values.append(ohlcv.loc[closest_idx, 'macd_line'])
+                    
+                    if len(sell_days) > 0:
+                        fig.add_trace(go.Scatter(
+                            x=sell_days,
+                            y=sell_macd_values,
+                            mode='markers',
+                            name='Sell Trades',
+                            marker=dict(
+                                color='#DC3545',
+                                size=12,
+                                symbol='circle',
+                                line=dict(width=2, color='white'),
+                                opacity=0.9
+                            ),
+                            hovertemplate=f'<b>SELL {symbol}</b><br>Day: %{{x}}<br>MACD Fast: %{{y:.4f}}<extra></extra>'
+                        ))
+                
+                fig.update_layout(
+                    title=dict(
+                        text=f'{symbol} - MACD Fast & Slow Lines with Trade Markers',
+                        x=0.5,
+                        xanchor='center',
+                        font=dict(size=18)
+                    ),
+                    xaxis=dict(
+                        title='Days',
+                        showgrid=True,
+                        gridcolor='rgba(128, 128, 128, 0.2)',
+                        range=[0, None]
+                    ),
+                    yaxis=dict(
+                        title='MACD Value',
+                        showgrid=True,
+                        gridcolor='rgba(128, 128, 128, 0.2)',
+                        zeroline=True,
+                        zerolinecolor='rgba(128, 128, 128, 0.5)'
+                    ),
+                    hovermode='closest',
+                    legend=dict(
+                        orientation='h',
+                        yanchor='bottom',
+                        y=1.02,
+                        xanchor='right',
+                        x=1
+                    ),
+                    template='plotly_dark',
+                    height=600
+                )
+                
+                stock_figures[symbol] = fig
+                logger.info(f"Created MACD chart for {symbol}")
+                
+            except Exception as e:
+                logger.warning(f"Could not create MACD chart for {symbol}: {e}")
+                continue
+        
+        return stock_figures
 

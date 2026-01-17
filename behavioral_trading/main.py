@@ -41,24 +41,17 @@ class BehavioralAnalyzer:
         self.n_clusters = n_clusters
         self.baseline_window = baseline_window
         
-        # Stage 1 components
         self.csv_loader = CSVTradebookLoader()
         self.pdf_loader = PDFTradebookLoader()
         self.validator = TradebookValidator()
         self.cleaner = TradebookCleaner()
-        
-        # Stage 2 components
         self.market_fetcher = MarketDataFetcher()
         self.feature_engineer = BehavioralFeatureEngineer()
         self.baseline_constructor = BaselineConstructor(window_size=baseline_window)
         self.pattern_discoverer = PatternDiscoverer(n_clusters=n_clusters)
         self.stability_analyzer = BehavioralStabilityAnalyzer(window_size=baseline_window)
-        
-        # Stage 3 components
         self.visualizer = BehavioralVisualizer()
         self.explainer = BehavioralExplainer()
-        
-        # Data storage
         self.trades: Optional[pd.DataFrame] = None
         self.enriched_trades: Optional[pd.DataFrame] = None
         self.features: Optional[pd.DataFrame] = None
@@ -239,6 +232,19 @@ class BehavioralAnalyzer:
             except Exception as e:
                 logger.warning(f"Could not create cluster timeline: {e}")
         
+        # Cluster scatter plot visualization (NEW)
+        if 'clusters' in patterns and 'labels' in patterns['clusters']:
+            clusters = patterns['clusters']['labels']
+            cluster_centers = patterns['clusters'].get('cluster_centers')
+            cluster_analysis = patterns['clusters'].get('analysis', {})
+            if cluster_centers is not None:
+                try:
+                    self.visualizer.create_cluster_scatter_plot(
+                        features, clusters, cluster_centers, cluster_analysis
+                    )
+                except Exception as e:
+                    logger.warning(f"Could not create cluster scatter plot: {e}")
+        
         # Trade Journey Timeline (user-friendly for retail investors)
         try:
             self.visualizer.create_trade_journey_timeline(features)
@@ -258,7 +264,25 @@ class BehavioralAnalyzer:
             except Exception as e:
                 logger.warning(f"Could not create stability scorecard: {e}")
         
-        # Save all figures
+        # Volatility Timeline with Trade Markers (NEW)
+        try:
+            self.visualizer.create_volatility_trade_timeline(features, self.market_fetcher)
+        except Exception as e:
+            logger.warning(f"Could not create volatility timeline: {e}")
+        
+        # S&P 500 Volatility Timeline with Trade Markers (NEW)
+        try:
+            self.visualizer.create_sp500_volatility_timeline(features, self.market_fetcher)
+        except Exception as e:
+            logger.warning(f"Could not create S&P 500 volatility timeline: {e}")
+        
+        try:
+            macd_charts = self.visualizer.create_macd_stock_charts(features, self.market_fetcher)
+            if macd_charts:
+                self.visualizer.figures['macd_stock_charts'] = macd_charts
+        except Exception as e:
+            logger.warning(f"Could not create MACD stock charts: {e}")
+        
         os.makedirs(output_dir, exist_ok=True)
         self.visualizer.save_all_figures(output_dir)
         
@@ -308,7 +332,6 @@ class BehavioralAnalyzer:
             results['patterns']
         )
         
-        # Add stability score to report if available
         if results.get('stability') and results['stability'].get('stability_score') is not None:
             stability_section = "\n\n" + "=" * 80 + "\n"
             stability_section += "BEHAVIORAL STABILITY / CONSISTENCY SCORE\n"
@@ -317,7 +340,6 @@ class BehavioralAnalyzer:
             stability_section += results['stability']['note'] + "\n"
             report += stability_section
         
-        # Generate XAI summary paragraph
         xai_summary = self.explainer.generate_xai_summary(
             results['features'],
             results['baselines'],
@@ -325,11 +347,9 @@ class BehavioralAnalyzer:
             results.get('stability')
         )
         
-        # Save main report
         with open(output_file, 'w') as f:
             f.write(report)
         
-        # Save XAI summary as separate file
         output_dir = os.path.dirname(output_file) if os.path.dirname(output_file) else "output"
         xai_output_file = os.path.join(output_dir, "xai_explanation.txt")
         with open(xai_output_file, 'w') as f:
@@ -349,6 +369,20 @@ class BehavioralAnalyzer:
             f.write("- Feature contribution ranking to identify key behavioral drivers\n")
             f.write("- Statistical analysis of trading patterns and deviations\n")
             f.write("=" * 80 + "\n")
+        
+        try:
+            stock_performance_report = self.explainer.analyze_stock_performance(
+                results['features'],
+                results['baselines']
+            )
+            stock_perf_file = os.path.join(output_dir, "stock_performance_analysis.txt")
+            with open(stock_perf_file, 'w', encoding='utf-8') as f:
+                f.write(stock_performance_report)
+            logger.info(f"Stock performance analysis saved to {stock_perf_file}")
+        except Exception as e:
+            logger.warning(f"Could not generate stock performance analysis: {e}")
+            import traceback
+            logger.debug(traceback.format_exc())
         
         logger.info(f"Report saved to {output_file}")
         logger.info(f"XAI explanation saved to {xai_output_file}")

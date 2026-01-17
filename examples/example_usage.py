@@ -50,22 +50,10 @@ def main():
         traceback.print_exc()
         return
     
-    # Generate visualizations
-    print("\nStep 5: Generating visualizations...")
+    # Generate report first (so dashboard can read clean files)
+    print("\nStep 5: Generating report...")
     try:
         os.makedirs("output", exist_ok=True)
-        viz_files = analyzer.visualize(results, output_dir="output/")
-        print(f"[OK] Visualizations saved:")
-        for name, path in viz_files.items():
-            print(f"  - {name}: {path}")
-    except Exception as e:
-        print(f"[ERROR] Error generating visualizations: {e}")
-        import traceback
-        traceback.print_exc()
-    
-    # Generate report
-    print("\nStep 6: Generating report...")
-    try:
         report = analyzer.generate_report(results, output_file="output/behavioral_report.txt")
         print("[OK] Report saved to: output/behavioral_report.txt")
         print("\n" + "="*80)
@@ -74,6 +62,18 @@ def main():
         print(report[:800] + "...\n")
     except Exception as e:
         print(f"[ERROR] Error generating report: {e}")
+    
+    # Generate visualizations (dashboard will read the newly generated reports)
+    print("\nStep 6: Generating visualizations...")
+    try:
+        viz_files = analyzer.visualize(results, output_dir="output/")
+        print(f"[OK] Visualizations saved:")
+        for name, path in viz_files.items():
+            print(f"  - {name}: {path}")
+    except Exception as e:
+        print(f"[ERROR] Error generating visualizations: {e}")
+        import traceback
+        traceback.print_exc()
     
     # Explain a specific trade
     print("\nStep 7: Explaining a specific trade...")
