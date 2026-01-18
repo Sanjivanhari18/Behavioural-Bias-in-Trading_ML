@@ -13,7 +13,7 @@ Pillow>=10.0.0
 
 # Market data
 yfinance>=0.2.28
-# Note: All indicators (EMA, RSI, ATR) are computed from OHLCV only - no external indicator libraries
+
 
 # Statistical analysis
 ruptures>=1.1.8
